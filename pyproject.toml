@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bdh-app-cameras"
+version = "1.0.0"
+description = "Black Diamond Hub app: live camera feeds via go2rtc and UniFi Protect"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "bdh-sdk>=0.2,<1",
+    "requests",
+]
+
+[project.urls]
+Source = "https://github.com/blackdiamondlodge/bdh-app-cameras"
+
+[project.entry-points."blackdiamondhub.plugins"]
+cameras = "cameras.plugin:spec"
+
+[tool.setuptools.packages.find]
+include = ["cameras", "cameras.*"]
+
+[tool.setuptools.package-data]
+cameras = [
+    "templates/**/*",
+    "static/**/*",
+    "migrations/*.py",
+]

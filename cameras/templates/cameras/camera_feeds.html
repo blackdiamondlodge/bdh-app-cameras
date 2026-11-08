@@ -1,0 +1,511 @@
+{% extends 'base.html' %}
+
+{% block title %}Camera Feeds{% endblock %}
+
+{% block content %}
+<style>
+    body {
+        background-color: #0a0a0a !important;
+        color: #ffffff;
+        margin: 0;
+        overflow: hidden;
+    }
+
+    .cameras-header {
+        text-align: center;
+        padding: 8px 10px 4px;
+    }
+
+    .cameras-header h1 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #e0e0e0;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin: 0;
+    }
+
+    /* Site tabs */
+    .site-tabs {
+        display: flex;
+        justify-content: center;
+        gap: 4px;
+        padding: 4px 8px 0;
+    }
+
+    .site-tab {
+        padding: 4px 16px;
+        border: none;
+        border-radius: 6px 6px 0 0;
+        background: #1a1a1a;
+        color: #888;
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        letter-spacing: 0.5px;
+        transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .site-tab:hover {
+        background: #252525;
+        color: #bbb;
+    }
+
+    .site-tab.active {
+        background: #222;
+        color: #fff;
+    }
+
+    .site-panel {
+        display: none;
+    }
+
+    .site-panel.active {
+        display: grid;
+    }
+
+    .camera-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        padding: 4px 8px 8px;
+        max-width: 1920px;
+        margin: 0 auto;
+    }
+
+    .camera-grid.has-tabs {
+        height: calc(100vh - 62px - 52px); /* navbar + header/tabs */
+    }
+
+    .camera-grid.no-tabs {
+        height: calc(100vh - 62px - 24px); /* navbar + header */
+    }
+
+    .cam-card {
+        position: relative;
+        background: #111;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+        cursor: pointer;
+    }
+
+    .cam-card video-stream,
+    .cam-card video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #000;
+    }
+
+    .cam-label {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 4px 10px;
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: #fff;
+        letter-spacing: 0.5px;
+        pointer-events: none;
+    }
+
+    .cam-status {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #4caf50;
+        box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+        pointer-events: none;
+    }
+
+    .cam-touch-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1;
+        cursor: pointer;
+    }
+
+    .ptz-controls {
+        position: absolute;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 2;
+        display: flex;
+        gap: 4px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+    }
+
+    .cam-card:hover .ptz-controls,
+    .cam-card:fullscreen .ptz-controls {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .ptz-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
+        font-size: 0.65rem;
+        font-weight: 700;
+        cursor: pointer;
+        backdrop-filter: blur(4px);
+        transition: background 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+    }
+
+    .ptz-btn:hover {
+        background: rgba(255, 255, 255, 0.45);
+    }
+
+    .ptz-btn.active {
+        background: rgba(76, 175, 80, 0.7);
+        box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+    }
+
+    /* Larger PTZ buttons in fullscreen */
+    .cam-card:fullscreen .ptz-controls {
+        bottom: 60px;
+        gap: 8px;
+    }
+
+    .cam-card:fullscreen .ptz-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 0.9rem;
+    }
+
+    .no-cameras {
+        text-align: center;
+        padding: 80px 20px;
+        color: #555;
+        grid-column: 1 / -1;
+    }
+
+    .no-cameras i {
+        font-size: 56px;
+        margin-bottom: 20px;
+        display: block;
+        color: #333;
+    }
+
+    .no-cameras h2 {
+        color: #666;
+        font-weight: 500;
+    }
+
+    .no-cameras p {
+        color: #444;
+        font-size: 0.9rem;
+    }
+
+    /* Fullscreen mode */
+    .cam-card:fullscreen {
+        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .cam-card:fullscreen video-stream,
+    .cam-card:fullscreen video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+
+    .cam-card:fullscreen .cam-label {
+        font-size: 1rem;
+        padding: 10px 16px;
+    }
+
+    /* Mobile: single column, allow scroll */
+    @media (max-width: 900px) {
+        body {
+            overflow: auto;
+        }
+        .camera-grid {
+            grid-template-columns: 1fr;
+            height: auto !important;
+            padding: 8px;
+            gap: 8px;
+        }
+        .cam-card {
+            aspect-ratio: 16 / 9;
+        }
+    }
+
+    /* 2-column for medium screens */
+    @media (min-width: 901px) and (max-width: 1200px) {
+        .camera-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+</style>
+
+<div class="cameras-header">
+    <h1><i class="fas fa-shield-alt"></i> &nbsp;Security Cameras</h1>
+</div>
+
+{% if sites|length > 1 %}
+<div class="site-tabs">
+    {% for site in sites %}
+    <button class="site-tab{% if forloop.first %} active{% endif %}" data-site="{{ forloop.counter0 }}">{{ site.name }}</button>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% for site in sites %}
+<div class="camera-grid site-panel{% if forloop.first %} active{% endif %}{% if sites|length > 1 %} has-tabs{% else %} no-tabs{% endif %}" data-site="{{ forloop.counter0 }}">
+    {% for stream in site.streams %}
+    <div class="cam-card">
+        <video-stream
+            data-stream-name="{{ stream.name }}"
+            data-has-low="{% if stream.has_low %}true{% else %}false{% endif %}"
+            data-mode="webrtc,mse,mp4"
+            data-site="{{ forloop.parentloop.counter0 }}">
+        </video-stream>
+        <div class="cam-touch-overlay"></div>
+        {% if stream.is_ptz and stream.ptz_presets > 0 %}
+        <div class="ptz-controls">
+            {% for i in stream.preset_range %}
+            <button class="ptz-btn" data-camera-id="{{ stream.camera_id }}" data-slot="{{ i }}">{{ i|add:1 }}</button>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div class="cam-status"></div>
+        <div class="cam-label">{{ stream.display_name }}</div>
+    </div>
+    {% empty %}
+    <div class="no-cameras">
+        <i class="fas fa-video-slash"></i>
+        <h2>No Cameras Available</h2>
+        <p>No camera streams found for {{ site.name }}.</p>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+{% load static %}
+<script>
+    // Build go2rtc base URL from the browser's current hostname
+    const GO2RTC_PORT = {{ go2rtc_port }};
+    const GO2RTC_BASE = `http://${window.location.hostname}:${GO2RTC_PORT}`;
+
+    // Dynamically load video-stream.js from go2rtc
+    // Returns a promise that resolves when the script is loaded
+    const go2rtcReady = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = `${GO2RTC_BASE}/video-stream.js`;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load video-stream.js from go2rtc'));
+        document.head.appendChild(script);
+    });
+</script>
+<script type="module">
+    /**
+     * Close a video-stream element's WebSocket and PeerConnection without
+     * clearing video.src.
+     *
+     * go2rtc's built-in ondisconnect() sets video.src = '' which triggers
+     * MEDIA_ERR_SRC_NOT_SUPPORTED asynchronously.  The video error handler
+     * in go2rtc's VideoRTC class then calls this.ws.close() — if a NEW
+     * WebSocket has been created in the meantime (e.g. for a fullscreen
+     * high-res stream), the error handler kills it, causing a failed
+     * connection + 15-second RECONNECT_TIMEOUT delay.
+     *
+     * Additionally, go2rtc's onclose() handler fires asynchronously when a
+     * WebSocket is closed.  If onconnect() has already created a new WS by
+     * then, onclose() sees wsState=CONNECTING (not CLOSED), passes its guard,
+     * and sets this.ws = null — killing the new WebSocket.  The subsequent
+     * onopen() then crashes with "Cannot read properties of null".
+     *
+     * safeDisconnect avoids both issues:
+     *  1. Does NOT set video.src = '' (prevents the video error cascade)
+     *  2. Installs a one-shot onclose override that absorbs the stale close
+     *     event from the old WebSocket before it can null-out the new one
+     */
+    function safeDisconnect(el) {
+        // Cancel any pending reconnect/disconnect timers from go2rtc
+        if (el.reconnectTID) {
+            clearTimeout(el.reconnectTID);
+            el.reconnectTID = 0;
+        }
+        if (el.disconnectTID) {
+            clearTimeout(el.disconnectTID);
+            el.disconnectTID = 0;
+        }
+
+        el.wsState = WebSocket.CLOSED;
+        if (el.ws) {
+            // Override onclose to absorb the stale close event from the OLD
+            // WebSocket.  Without this, the async close fires after onconnect()
+            // has created a new WS, and onclose() nulls this.ws — crashing
+            // the subsequent onopen().  Restore the original after one call.
+            const origOnclose = el.onclose;
+            el.onclose = function() {
+                el.onclose = origOnclose;
+                return false;
+            };
+            el.ws.close();
+            el.ws = null;
+        }
+
+        el.pcState = WebSocket.CLOSED;
+        if (el.pc) {
+            el.pc.getSenders().forEach(sender => {
+                if (sender.track) sender.track.stop();
+            });
+            el.pc.close();
+            el.pc = null;
+        }
+
+        // Intentionally NOT setting video.src = '' or video.srcObject = null
+        // to prevent the video error handler from closing new WebSockets.
+    }
+
+    // Initialize video-stream elements for a panel (low quality for grid)
+    function initStreams(panel) {
+        panel.querySelectorAll('video-stream').forEach(el => {
+            if (!el.dataset.active) {
+                const streamName = el.dataset.streamName;
+                const hasLow = el.dataset.hasLow === 'true';
+                const src = hasLow ? `${streamName}_low` : streamName;
+                el.background = true;
+                el.mode = el.dataset.mode;
+                if (el.video) el.video.muted = true;
+                el.src = `${GO2RTC_BASE}/api/ws?src=${src}`;
+                el.dataset.active = 'true';
+            }
+        });
+    }
+
+    // Stop all streams in a panel (free bandwidth)
+    function stopStreams(panel) {
+        panel.querySelectorAll('video-stream').forEach(el => {
+            if (el.dataset.active) {
+                safeDisconnect(el);
+                delete el.dataset.active;
+            }
+        });
+    }
+
+    // Wait for video-stream.js to load before initializing
+    go2rtcReady.then(() => {
+        // Initialize the first (active) panel
+        const activePanel = document.querySelector('.site-panel.active');
+        if (activePanel) initStreams(activePanel);
+    }).catch(err => console.error(err));
+
+    // Tab switching — stop old tab streams, start new tab streams
+    document.querySelectorAll('.site-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const siteIdx = tab.dataset.site;
+
+            // Stop streams on the currently active panel
+            const oldPanel = document.querySelector('.site-panel.active');
+            if (oldPanel) stopStreams(oldPanel);
+
+            // Update tab styles
+            document.querySelectorAll('.site-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Show/hide panels
+            document.querySelectorAll('.site-panel').forEach(p => p.classList.remove('active'));
+            const panel = document.querySelector(`.site-panel[data-site="${siteIdx}"]`);
+            panel.classList.add('active');
+
+            // Start streams on the new panel
+            initStreams(panel);
+        });
+    });
+
+    // Fullscreen: switch to high-res, pause others
+    document.querySelectorAll('.cam-touch-overlay').forEach(overlay => {
+        overlay.addEventListener('click', () => {
+            const card = overlay.closest('.cam-card');
+            if (!document.fullscreenElement) {
+                card.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen();
+            }
+        });
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+        const activePanel = document.querySelector('.site-panel.active');
+        if (!activePanel) return;
+
+        if (document.fullscreenElement) {
+            // Entering fullscreen — switch this stream to high-res, stop others
+            const fsCard = document.fullscreenElement;
+            const fsStream = fsCard.querySelector('video-stream');
+
+            // Stop ALL streams first (closes their WebSocket connections)
+            stopStreams(activePanel);
+
+            // Start the fullscreen stream at high quality after a tick.
+            // go2rtc's VideoRTC.onclose() handler fires asynchronously when
+            // a WebSocket closes.  If we create a new connection in the same
+            // synchronous block, onclose() sees wsState=CONNECTING (not CLOSED)
+            // and triggers a spurious reconnect — orphaning the new WS and
+            // leaving a dangling PeerConnection ("pending" RTC).  Deferring
+            // the new connection lets the close event fire while wsState is
+            // still CLOSED, so onclose() exits harmlessly.
+            if (fsStream) {
+                setTimeout(() => {
+                    const streamName = fsStream.dataset.streamName;
+                    if (fsStream.video) fsStream.video.muted = true;
+                    fsStream.src = `${GO2RTC_BASE}/api/ws?src=${streamName}`;
+                    fsStream.dataset.active = 'true';
+                }, 0);
+            }
+        } else {
+            // Exiting fullscreen — restart everything at low quality.
+            // Same race-avoidance pattern: stop first, restart after a tick.
+            stopStreams(activePanel);
+            setTimeout(() => initStreams(activePanel), 0);
+        }
+    });
+
+    // PTZ preset buttons
+    document.querySelectorAll('.ptz-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const cameraId = btn.dataset.cameraId;
+            const slot = parseInt(btn.dataset.slot);
+
+            // Visual feedback - highlight active preset
+            btn.closest('.ptz-controls').querySelectorAll('.ptz-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            fetch('{% url "ptz_goto" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}',
+                },
+                body: JSON.stringify({camera_id: cameraId, slot: slot}),
+            }).catch(() => {});
+        });
+    });
+</script>
+{% endblock %}
