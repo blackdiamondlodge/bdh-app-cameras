@@ -1778,3 +1778,20 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
             len(ws_errors), 0,
             f"WebSocket errors occurred during fullscreen cycle: {ws_errors}"
         )
+
+
+class HomepageStatusTests(TestCase):
+    @patch("cameras.homepage.get_protect_cameras")
+    def test_counts_first_site_only(self, mock_get):
+        from .homepage import status
+        mock_get.return_value = [
+            {"name": "Sun Peaks", "cameras": [{}] * 9},
+            {"name": "Mercer Island", "cameras": [{}] * 7},
+        ]
+        self.assertEqual(status().text, "9 cameras")
+
+    @patch("cameras.homepage.get_protect_cameras")
+    def test_no_sites(self, mock_get):
+        from .homepage import status
+        mock_get.return_value = []
+        self.assertIsNone(status())
