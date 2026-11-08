@@ -1782,13 +1782,15 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
 
 class HomepageStatusTests(TestCase):
     @patch("cameras.homepage.get_protect_cameras")
-    def test_counts_first_site_only(self, mock_get):
+    def test_counts_all_sites_only_for_owner(self, mock_get):
         from .homepage import status
         mock_get.return_value = [
             {"name": "Sun Peaks", "cameras": [{}] * 9},
             {"name": "Mercer Island", "cameras": [{}] * 7},
         ]
         self.assertEqual(status().text, "9 cameras")
+        self.assertEqual(status(mode="dashboard").text, "9 cameras")
+        self.assertEqual(status(mode="owner").text, "16 cameras")
 
     @patch("cameras.homepage.get_protect_cameras")
     def test_no_sites(self, mock_get):
