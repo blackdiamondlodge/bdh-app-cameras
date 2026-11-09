@@ -604,13 +604,6 @@ MULTI_SITE_CAMERAS = [
 ]
 
 
-@override_settings(
-    GO2RTC_URL='http://localhost:1984',
-    UNIFI_PROTECT_SITES=[
-        {'host': '192.168.10.1', 'api_key': 'key1', 'name': 'Sun Peaks'},
-        {'host': '192.168.1.26', 'api_key': 'key2', 'name': 'Mercer Island'},
-    ],
-)
 def _cam(name, cid, **extra):
     cam = {'name': name, 'stream_name': cid, 'rtsp_url': 'rtsps://x',
            'rtsp_url_low': 'rtsps://x_low', 'camera_id': cid,
@@ -619,6 +612,10 @@ def _cam(name, cid, **extra):
     return cam
 
 
+@override_settings(
+    GO2RTC_URL='http://localhost:1984',
+    UNIFI_PROTECT_SITES=[{'host': '192.168.10.1', 'api_key': 'k', 'name': 'Sun Peaks'}],
+)
 class HeroLayoutTests(TestCase):
     """Sites with enough cameras feature the doorbell as a large hero tile."""
 
@@ -671,6 +668,13 @@ class HeroLayoutTests(TestCase):
         self.assertNotIn('cam-card hero', content)
 
 
+@override_settings(
+    GO2RTC_URL='http://localhost:1984',
+    UNIFI_PROTECT_SITES=[
+        {'host': '192.168.10.1', 'api_key': 'key1', 'name': 'Sun Peaks'},
+        {'host': '192.168.1.26', 'api_key': 'key2', 'name': 'Mercer Island'},
+    ],
+)
 class CameraFeedViewAuthFilterTests(TestCase):
     """Only the primary site is visible to unauthenticated users."""
 
