@@ -1642,6 +1642,65 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
             f"(took {elapsed:.1f}s) — safeDisconnect may be broken"
         )
 
+    def test_fullscreen_close_after_next_exits_completely(self):
+        """Close after stepping to the next camera leaves fullscreen entirely.
+
+        Each prev/next press calls requestFullscreen on another card, which
+        stacks fullscreen elements; a single exitFullscreen only pops back to
+        the previous camera.
+        """
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        source = urllib.parse.quote('ffmpeg:virtual?video#video=h264', safe='')
+        req = urllib.request.Request(
+            f'{GO2RTC_CI_URL}/api/streams?name=test_cam2&src={source}',
+            method='PUT', data=b'',
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        self.addCleanup(lambda: urllib.request.urlopen(urllib.request.Request(
+            f'{GO2RTC_CI_URL}/api/streams?src=test_cam2', method='DELETE',
+        ), timeout=10))
+
+        self.driver.get(f'{self.live_server_url}/cameras/')
+        WebDriverWait(self.driver, 15).until(
+            lambda d: d.execute_script(
+                "return customElements.get('video-stream') !== undefined"
+            )
+        )
+        self.assertGreaterEqual(
+            len(self.driver.find_elements(By.CSS_SELECTOR, '.cam-card')), 2,
+        )
+
+        first = self.driver.find_elements(By.CSS_SELECTOR, '.cam-card')[0]
+        first.find_element(By.CSS_SELECTOR, '.cam-touch-overlay').click()
+        try:
+            WebDriverWait(self.driver, 3).until(
+                lambda d: d.execute_script(
+                    "return document.fullscreenElement !== null"
+                )
+            )
+        except Exception:
+            self.skipTest("Browser did not enter fullscreen")
+
+        first.find_element(By.CSS_SELECTOR, '.cam-fs-next').click()
+        WebDriverWait(self.driver, 3).until(
+            lambda d: d.execute_script(
+                "const fs = document.fullscreenElement;"
+                "return fs !== null && fs !== document.querySelector('.cam-card');"
+            )
+        )
+
+        self.driver.execute_script(
+            "document.fullscreenElement.querySelector('.cam-fs-close').click()"
+        )
+        WebDriverWait(self.driver, 3).until(
+            lambda d: d.execute_script(
+                "return document.fullscreenElement === null"
+            )
+        )
+
     def test_fullscreen_exit_streams_recover(self):
         """After exiting fullscreen, grid streams recover within 10 seconds.
 

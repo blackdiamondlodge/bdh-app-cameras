@@ -495,6 +495,24 @@
         });
     });
 
+    // Prev/next stacks fullscreen elements (each requestFullscreen pushes
+    // onto the browser's fullscreen stack and exitFullscreen pops one), so
+    // closing must unwind the whole stack.  Intermediate pops are ignored
+    // by the fullscreenchange handler.
+    let exitingAll = false;
+    async function exitAllFullscreen() {
+        exitingAll = true;
+        try {
+            while (document.fullscreenElement) {
+                await document.exitFullscreen();
+            }
+        } catch (e) {
+            // ignore
+        } finally {
+            exitingAll = false;
+        }
+    }
+
     // Fullscreen: switch to high-res, pause others
     document.querySelectorAll('.cam-touch-overlay').forEach(overlay => {
         overlay.addEventListener('click', () => {
@@ -502,7 +520,7 @@
             if (!document.fullscreenElement) {
                 card.requestFullscreen().catch(() => {});
             } else {
-                document.exitFullscreen();
+                exitAllFullscreen();
             }
         });
     });
@@ -510,6 +528,8 @@
     document.addEventListener('fullscreenchange', () => {
         const activePanel = document.querySelector('.site-panel.active');
         if (!activePanel) return;
+
+        if (exitingAll && document.fullscreenElement) return;
 
         if (document.fullscreenElement) {
             // Entering fullscreen — switch this stream to high-res, stop others
@@ -550,7 +570,7 @@
             e.stopPropagation();
             const card = btn.closest('.cam-card');
             if (btn.classList.contains('cam-fs-close')) {
-                document.exitFullscreen().catch(() => {});
+                exitAllFullscreen();
                 return;
             }
             const cards = [...card.parentElement.querySelectorAll('.cam-card')];
