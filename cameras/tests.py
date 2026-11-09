@@ -611,6 +611,66 @@ MULTI_SITE_CAMERAS = [
         {'host': '192.168.1.26', 'api_key': 'key2', 'name': 'Mercer Island'},
     ],
 )
+def _cam(name, cid, **extra):
+    cam = {'name': name, 'stream_name': cid, 'rtsp_url': 'rtsps://x',
+           'rtsp_url_low': 'rtsps://x_low', 'camera_id': cid,
+           'is_ptz': False, 'ptz_presets': 0}
+    cam.update(extra)
+    return cam
+
+
+class HeroLayoutTests(TestCase):
+    """Sites with enough cameras feature the doorbell as a large hero tile."""
+
+    def setUp(self):
+        self.client = Client()
+        clear_cache()
+
+    def _get(self, cameras):
+        with patch("cameras.views._register_streams_with_go2rtc"), \
+                patch("cameras.views.get_protect_cameras") as mock_cameras:
+            mock_cameras.return_value = [
+                {'name': 'Sun Peaks', 'host': '192.168.10.1', 'cameras': cameras},
+            ]
+            return self.client.get("/cameras/")
+
+    def test_doorbell_moved_first_as_hero(self):
+        cams = [_cam(n, f"c{i}") for i, n in enumerate(['Backyard', 'Garage', 'Hot Tub', 'Side Yard'])]
+        cams.insert(2, _cam('Front Bell', 'bell', is_doorbell=True))
+        response = self._get(cams)
+        site = response.context['sites'][0]
+        self.assertTrue(site['hero'])
+        self.assertEqual(
+            [s['display_name'] for s in site['streams']],
+            ['Front Bell', 'Backyard', 'Garage', 'Hot Tub', 'Side Yard'],
+        )
+        content = response.content.decode()
+        self.assertIn('has-hero', content)
+        self.assertEqual(content.count('cam-card hero'), 1)
+
+    def test_doorbell_matched_by_name(self):
+        names = ['Backyard', 'Doorbell Camera', 'Garage', 'Hot Tub', 'Side Yard']
+        response = self._get([_cam(n, f"c{i}") for i, n in enumerate(names)])
+        self.assertEqual(response.context['sites'][0]['streams'][0]['display_name'], 'Doorbell Camera')
+
+    def test_first_camera_is_hero_without_doorbell(self):
+        names = ['Backyard', 'Garage', 'Hot Tub', 'Side Yard', 'Shed']
+        response = self._get([_cam(n, f"c{i}") for i, n in enumerate(names)])
+        site = response.context['sites'][0]
+        self.assertTrue(site['hero'])
+        self.assertEqual([s['display_name'] for s in site['streams']], names)
+
+    def test_small_site_has_no_hero(self):
+        names = ['Doorbell', 'Garage', 'Hot Tub']
+        response = self._get([_cam(n, f"c{i}") for i, n in enumerate(names)])
+        site = response.context['sites'][0]
+        self.assertFalse(site['hero'])
+        self.assertEqual([s['display_name'] for s in site['streams']], names)
+        content = response.content.decode()
+        self.assertNotIn('has-hero', content)
+        self.assertNotIn('cam-card hero', content)
+
+
 class CameraFeedViewAuthFilterTests(TestCase):
     """Only the primary site is visible to unauthenticated users."""
 

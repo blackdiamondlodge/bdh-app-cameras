@@ -358,6 +358,7 @@ def _fetch_cameras_from_site_ex(host, api_key, site_name=None):
             }
 
             # Collect RTSPS results
+            types = {cid: ctype or '' for cid, _, _, ctype in pending}
             rtsps_results = {}
             for f in as_completed(rtsps_futures):
                 camera_id, name, stream_name = rtsps_futures[f]
@@ -371,6 +372,7 @@ def _fetch_cameras_from_site_ex(host, api_key, site_name=None):
                         'rtsp_url_low': rtsps_urls.get('low', ''),
                         'is_ptz': False,
                         'ptz_presets': 0,
+                        'is_doorbell': 'doorbell' in types.get(camera_id, '').lower(),
                     }
                 else:
                     complete = False

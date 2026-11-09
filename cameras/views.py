@@ -104,6 +104,25 @@ def _put_stream(go2rtc_url, name, rtsp_url):
         )
 
 
+# Sites with at least this many cameras get a large "hero" tile.
+HERO_MIN_CAMERAS = 5
+
+
+def _with_hero(streams):
+    """Move the doorbell (else the first camera) to the front for the hero tile.
+
+    Returns ``(streams, has_hero)``; small sites keep a plain grid.
+    """
+    if len(streams) < HERO_MIN_CAMERAS:
+        return streams, False
+    idx = next(
+        (i for i, s in enumerate(streams)
+         if s.get('is_doorbell') or 'doorbell' in s['display_name'].lower()),
+        0,
+    )
+    return [streams[idx]] + streams[:idx] + streams[idx + 1:], True
+
+
 def camera_feed_view(request):
     """Display camera feeds via go2rtc, with tabs for multiple sites.
 
@@ -137,17 +156,20 @@ def camera_feed_view(request):
                     'ptz_presets': cam.get('ptz_presets', 0),
                     'preset_range': list(range(cam.get('ptz_presets', 0))),
                     'has_low': bool(cam.get('rtsp_url_low', '')),
+                    'is_doorbell': cam.get('is_doorbell', False),
                 }
                 for cam in all_cameras
             ]
+            streams, hero = _with_hero(streams)
             sites.append({
                 'name': site['name'],
                 'streams': streams,
+                'hero': hero,
             })
     else:
         # Fallback: show streams already configured in go2rtc
-        streams = get_go2rtc_streams(go2rtc_url)
-        sites = [{'name': 'Cameras', 'streams': streams}]
+        streams, hero = _with_hero(get_go2rtc_streams(go2rtc_url))
+        sites = [{'name': 'Cameras', 'streams': streams, 'hero': hero}]
 
     # Extract port from GO2RTC_URL for browser-side URL construction
     from urllib.parse import urlparse

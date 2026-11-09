@@ -1,281 +1,308 @@
 {% extends 'base.html' %}
 
-{% block title %}Camera Feeds{% endblock %}
+{% block title %}Cameras{% endblock %}
+
+{% block navbar_extras %}
+{% if sites|length > 1 %}
+<div class="navbar-extras">
+    <div class="site-tabs">
+        {% for site in sites %}
+        <button type="button" class="site-tab navbar-toggle-btn{% if forloop.first %} active{% endif %}" data-site="{{ forloop.counter0 }}"><i class="fas fa-location-dot me-1"></i>{{ site.name }}</button>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
 
 {% block content %}
 <style>
     body {
-        background-color: #0a0a0a !important;
-        color: #ffffff;
+        background: radial-gradient(ellipse 120% 80% at 50% 0%, #1d3350 0%, #0c1622 55%, #060a10 100%) fixed !important;
+        color: #fff;
         margin: 0;
         overflow: hidden;
     }
 
-    .cameras-header {
-        text-align: center;
-        padding: 8px 10px 4px;
-    }
+    .site-tabs { display: flex; gap: 6px; }
 
-    .cameras-header h1 {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #e0e0e0;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin: 0;
-    }
-
-    /* Site tabs */
-    .site-tabs {
-        display: flex;
-        justify-content: center;
-        gap: 4px;
-        padding: 4px 8px 0;
-    }
-
-    .site-tab {
-        padding: 4px 16px;
-        border: none;
-        border-radius: 6px 6px 0 0;
-        background: #1a1a1a;
-        color: #888;
-        font-size: 0.8rem;
-        font-weight: 600;
-        cursor: pointer;
-        letter-spacing: 0.5px;
-        transition: background 0.15s ease, color 0.15s ease;
-    }
-
-    .site-tab:hover {
-        background: #252525;
-        color: #bbb;
-    }
-
-    .site-tab.active {
-        background: #222;
-        color: #fff;
-    }
-
-    .site-panel {
-        display: none;
-    }
-
-    .site-panel.active {
-        display: grid;
-    }
+    .site-panel { display: none; }
+    .site-panel.active { display: grid; }
 
     .camera-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 6px;
-        padding: 4px 8px 8px;
+        --cols: 3;
+        grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+        grid-auto-rows: minmax(0, 1fr);
+        gap: 12px;
+        padding: 14px;
+        height: calc(100vh - 62px);
+        box-sizing: border-box;
         max-width: 1920px;
         margin: 0 auto;
     }
-
-    .camera-grid.has-tabs {
-        height: calc(100vh - 62px - 52px); /* navbar + header/tabs */
-    }
-
-    .camera-grid.no-tabs {
-        height: calc(100vh - 62px - 24px); /* navbar + header */
-    }
+    .camera-grid.n1 { --cols: 1; }
+    .camera-grid.n2, .camera-grid.n4 { --cols: 2; }
+    .camera-grid.has-hero { --cols: 4; }
+    .camera-grid.has-hero .cam-card.hero { grid-column: span 2; grid-row: span 2; }
 
     .cam-card {
         position: relative;
-        background: #111;
-        border-radius: 8px;
+        min-height: 0;
+        border-radius: 18px;
         overflow: hidden;
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+        background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(255,255,255,.02)), #05080d;
+        border: 1px solid rgba(255,255,255,.1);
+        box-shadow: 0 14px 36px rgba(0,0,0,.35);
         cursor: pointer;
+        transition: transform .15s ease, border-color .15s ease;
     }
+    .cam-card:active { transform: scale(.985); }
+    .cam-card.hero { border-color: rgba(255,195,92,.28); }
 
     .cam-card video-stream,
     .cam-card video {
         display: block;
         width: 100%;
         height: 100%;
-        object-fit: contain;
-        background: #000;
+        object-fit: cover;
+        background: transparent;
     }
+    .cam-card video::-webkit-media-controls { display: none !important; }
+    /* go2rtc's built-in "MSE / loading" overlay */
+    .cam-card video-stream .info { display: none !important; }
+
+    /* Bottom shade so labels stay readable over bright snow */
+    .cam-card::after {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 38%;
+        background: linear-gradient(transparent, rgba(4,8,14,.75));
+        pointer-events: none;
+    }
+
+    /* Shimmer while a stream is connecting */
+    .cam-card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.06) 50%, transparent 70%);
+        background-size: 250% 100%;
+        animation: cam-shimmer 1.6s linear infinite;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity .3s ease;
+    }
+    .cam-card[data-state="connecting"]::before,
+    .cam-card[data-state="reconnecting"]::before { opacity: 1; }
+    @keyframes cam-shimmer { from { background-position: 150% 0; } to { background-position: -100% 0; } }
 
     .cam-label {
         position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        padding: 4px 10px;
-        background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: #fff;
-        letter-spacing: 0.5px;
+        left: 12px;
+        bottom: 12px;
+        z-index: 2;
+        max-width: calc(100% - 24px);
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(10,18,28,.55);
+        border: 1px solid rgba(255,255,255,.12);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: .02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         pointer-events: none;
     }
+    .cam-card.hero .cam-label { font-size: 17px; padding: 8px 16px; left: 16px; bottom: 16px; }
 
     .cam-status {
         position: absolute;
-        top: 6px;
-        right: 8px;
+        top: 10px;
+        right: 10px;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(10,18,28,.55);
+        border: 1px solid rgba(255,255,255,.12);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .14em;
+        color: rgba(255,255,255,.75);
+        pointer-events: none;
+    }
+    .cam-status::before {
+        content: "";
         width: 7px;
         height: 7px;
         border-radius: 50%;
-        background: #4caf50;
-        box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
-        pointer-events: none;
+        background: #8a97a8;
     }
+    .cam-status::after { content: "CONNECTING"; }
+    .cam-card[data-state="live"] .cam-status { color: #fff; }
+    .cam-card[data-state="live"] .cam-status::before {
+        background: #ff4d4d;
+        box-shadow: 0 0 8px #ff4d4d;
+        animation: cam-pulse 2s ease-in-out infinite;
+    }
+    .cam-card[data-state="live"] .cam-status::after { content: "LIVE"; }
+    .cam-card[data-state="reconnecting"] .cam-status::before { background: #ffc35c; }
+    .cam-card[data-state="reconnecting"] .cam-status::after { content: "RECONNECTING"; }
+    @keyframes cam-pulse { 50% { opacity: .45; } }
 
     .cam-touch-overlay {
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        inset: 0;
         z-index: 1;
         cursor: pointer;
     }
 
+    /* PTZ presets: always visible on the hero and in fullscreen (touch kiosk) */
     .ptz-controls {
         position: absolute;
-        bottom: 24px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 2;
-        display: flex;
-        gap: 4px;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-        pointer-events: none;
+        right: 12px;
+        bottom: 12px;
+        z-index: 3;
+        display: none;
+        gap: 6px;
+        padding: 5px;
+        border-radius: 999px;
+        background: rgba(10,18,28,.55);
+        border: 1px solid rgba(255,255,255,.12);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
     }
-
     .cam-card:hover .ptz-controls,
-    .cam-card:fullscreen .ptz-controls {
-        opacity: 1;
-        pointer-events: auto;
-    }
+    .cam-card.hero .ptz-controls,
+    .cam-card:fullscreen .ptz-controls { display: flex; }
 
     .ptz-btn {
-        width: 28px;
-        height: 28px;
-        border: none;
+        width: 30px;
+        height: 30px;
+        border: 1px solid rgba(255,255,255,.15);
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.2);
+        background: rgba(255,255,255,.1);
         color: #fff;
-        font-size: 0.65rem;
+        font-size: 12px;
         font-weight: 700;
         cursor: pointer;
-        backdrop-filter: blur(4px);
-        transition: background 0.15s ease;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 0;
+        transition: background .15s ease;
     }
-
-    .ptz-btn:hover {
-        background: rgba(255, 255, 255, 0.45);
-    }
-
+    .ptz-btn:hover { background: rgba(255,255,255,.25); }
     .ptz-btn.active {
-        background: rgba(76, 175, 80, 0.7);
-        box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+        background: #ffc35c;
+        border-color: #ffc35c;
+        color: #1a1208;
+        box-shadow: 0 0 10px rgba(255,195,92,.6);
     }
 
-    /* Larger PTZ buttons in fullscreen */
-    .cam-card:fullscreen .ptz-controls {
-        bottom: 60px;
-        gap: 8px;
-    }
-
-    .cam-card:fullscreen .ptz-btn {
-        width: 44px;
-        height: 44px;
-        font-size: 0.9rem;
-    }
-
-    .no-cameras {
-        text-align: center;
-        padding: 80px 20px;
-        color: #555;
-        grid-column: 1 / -1;
-    }
-
-    .no-cameras i {
-        font-size: 56px;
-        margin-bottom: 20px;
-        display: block;
-        color: #333;
-    }
-
-    .no-cameras h2 {
-        color: #666;
-        font-weight: 500;
-    }
-
-    .no-cameras p {
-        color: #444;
-        font-size: 0.9rem;
-    }
-
-    /* Fullscreen mode */
+    /* Fullscreen-only chrome */
+    .cam-fs-bar { display: none; }
     .cam-card:fullscreen {
         background: #000;
+        border: 0;
+        border-radius: 0;
+    }
+    .cam-card:fullscreen video-stream,
+    .cam-card:fullscreen video { object-fit: contain; }
+    .cam-card:fullscreen .cam-label { font-size: 20px; padding: 10px 20px; left: 24px; bottom: 24px; }
+    .cam-card:fullscreen .cam-status { top: 24px; right: 96px; font-size: 12px; padding: 7px 14px; }
+    .cam-card:fullscreen .ptz-controls { right: 24px; bottom: 24px; gap: 10px; padding: 8px; }
+    .cam-card:fullscreen .ptz-btn { width: 48px; height: 48px; font-size: 16px; }
+    .cam-card:fullscreen .cam-fs-bar { display: block; }
+    .cam-fs-btn {
+        position: absolute;
+        z-index: 3;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,.15);
+        background: rgba(10,18,28,.55);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        color: #fff;
+        font-size: 22px;
         display: flex;
         align-items: center;
         justify-content: center;
+        cursor: pointer;
+    }
+    .cam-fs-close { top: 16px; right: 24px; }
+    .cam-fs-prev, .cam-fs-next { top: 50%; transform: translateY(-50%); }
+    .cam-fs-prev { left: 24px; }
+    .cam-fs-next { right: 24px; }
+    .cam-fs-clock {
+        position: absolute;
+        z-index: 2;
+        top: 26px;
+        left: 24px;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: .08em;
+        color: rgba(255,255,255,.8);
+        text-shadow: 0 1px 4px rgba(0,0,0,.6);
+        pointer-events: none;
     }
 
-    .cam-card:fullscreen video-stream,
-    .cam-card:fullscreen video {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
+    .no-cameras {
+        grid-column: 1 / -1;
+        grid-row: 1 / -1;
+        align-self: center;
+        justify-self: center;
+        text-align: center;
+        padding: 48px 64px;
+        border-radius: 22px;
+        background: linear-gradient(160deg, rgba(255,255,255,.11), rgba(255,255,255,.03));
+        border: 1px solid rgba(255,255,255,.1);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 14px 36px rgba(0,0,0,.28);
     }
-
-    .cam-card:fullscreen .cam-label {
-        font-size: 1rem;
-        padding: 10px 16px;
-    }
+    .no-cameras i { font-size: 48px; margin-bottom: 18px; display: block; color: rgba(255,255,255,.35); }
+    .no-cameras h2 { font-size: 15px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.75); }
+    .no-cameras p { color: rgba(255,255,255,.5); font-size: 14px; margin: 0; }
 
     /* Mobile: single column, allow scroll */
     @media (max-width: 900px) {
-        body {
-            overflow: auto;
+        body { overflow: auto; }
+        .camera-grid, .camera-grid.has-hero {
+            --cols: 1;
+            height: auto;
+            grid-auto-rows: auto;
+            padding: 10px;
+            gap: 10px;
         }
-        .camera-grid {
-            grid-template-columns: 1fr;
-            height: auto !important;
-            padding: 8px;
-            gap: 8px;
-        }
-        .cam-card {
-            aspect-ratio: 16 / 9;
-        }
+        .camera-grid.has-hero .cam-card.hero { grid-column: auto; grid-row: auto; }
+        .cam-card { aspect-ratio: 16 / 9; }
     }
 
-    /* 2-column for medium screens */
+    /* 2-column for medium screens, hero spans the full width */
     @media (min-width: 901px) and (max-width: 1200px) {
-        .camera-grid {
-            grid-template-columns: repeat(2, 1fr);
+        body { overflow: auto; }
+        .camera-grid, .camera-grid.has-hero {
+            --cols: 2;
+            height: auto;
+            grid-auto-rows: auto;
         }
+        .camera-grid.has-hero .cam-card.hero { grid-row: auto; }
+        .cam-card { aspect-ratio: 16 / 9; }
     }
 </style>
 
-<div class="cameras-header">
-    <h1><i class="fas fa-shield-alt"></i> &nbsp;Security Cameras</h1>
-</div>
-
-{% if sites|length > 1 %}
-<div class="site-tabs">
-    {% for site in sites %}
-    <button class="site-tab{% if forloop.first %} active{% endif %}" data-site="{{ forloop.counter0 }}">{{ site.name }}</button>
-    {% endfor %}
-</div>
-{% endif %}
-
 {% for site in sites %}
-<div class="camera-grid site-panel{% if forloop.first %} active{% endif %}{% if sites|length > 1 %} has-tabs{% else %} no-tabs{% endif %}" data-site="{{ forloop.counter0 }}">
+<div class="camera-grid site-panel{% if forloop.first %} active{% endif %}{% if site.hero %} has-hero{% else %} n{{ site.streams|length }}{% endif %}" data-site="{{ forloop.counter0 }}">
     {% for stream in site.streams %}
-    <div class="cam-card">
+    <div class="cam-card{% if site.hero and forloop.first %} hero{% endif %}" data-state="connecting">
         <video-stream
             data-stream-name="{{ stream.name }}"
             data-has-low="{% if stream.has_low %}true{% else %}false{% endif %}"
@@ -292,6 +319,12 @@
         {% endif %}
         <div class="cam-status"></div>
         <div class="cam-label">{{ stream.display_name }}</div>
+        <div class="cam-fs-bar">
+            <div class="cam-fs-clock"></div>
+            <button type="button" class="cam-fs-btn cam-fs-close" aria-label="Close"><i class="fas fa-xmark"></i></button>
+            <button type="button" class="cam-fs-btn cam-fs-prev" aria-label="Previous camera"><i class="fas fa-chevron-left"></i></button>
+            <button type="button" class="cam-fs-btn cam-fs-next" aria-label="Next camera"><i class="fas fa-chevron-right"></i></button>
+        </div>
     </div>
     {% empty %}
     <div class="no-cameras">
@@ -382,6 +415,29 @@
         // to prevent the video error handler from closing new WebSockets.
     }
 
+    // Reflect playback state on the card (LIVE / CONNECTING / RECONNECTING)
+    // and hide go2rtc's native video controls.
+    function watchState(el) {
+        const card = el.closest('.cam-card');
+        const v = el.video;
+        if (!card || !v) return;
+        v.controls = false;
+        v.playsInline = true;
+        card.dataset.state = 'connecting';
+        if (v.dataset.watched) return;
+        v.dataset.watched = 'true';
+        const set = state => { card.dataset.state = state; };
+        v.addEventListener('playing', () => set('live'));
+        v.addEventListener('timeupdate', () => {
+            if (card.dataset.state !== 'live' && !v.paused) set('live');
+        });
+        v.addEventListener('waiting', () => set('connecting'));
+        ['stalled', 'error', 'emptied'].forEach(evt =>
+            v.addEventListener(evt, () => {
+                if (el.dataset.active) set('reconnecting');
+            }));
+    }
+
     // Initialize video-stream elements for a panel (low quality for grid)
     function initStreams(panel) {
         panel.querySelectorAll('video-stream').forEach(el => {
@@ -392,6 +448,7 @@
                 el.background = true;
                 el.mode = el.dataset.mode;
                 if (el.video) el.video.muted = true;
+                watchState(el);
                 el.src = `${GO2RTC_BASE}/api/ws?src=${src}`;
                 el.dataset.active = 'true';
             }
@@ -474,6 +531,7 @@
                 setTimeout(() => {
                     const streamName = fsStream.dataset.streamName;
                     if (fsStream.video) fsStream.video.muted = true;
+                    watchState(fsStream);
                     fsStream.src = `${GO2RTC_BASE}/api/ws?src=${streamName}`;
                     fsStream.dataset.active = 'true';
                 }, 0);
@@ -485,6 +543,31 @@
             setTimeout(() => initStreams(activePanel), 0);
         }
     });
+
+    // Fullscreen chrome: close, step to the previous/next camera, clock
+    document.querySelectorAll('.cam-fs-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const card = btn.closest('.cam-card');
+            if (btn.classList.contains('cam-fs-close')) {
+                document.exitFullscreen().catch(() => {});
+                return;
+            }
+            const cards = [...card.parentElement.querySelectorAll('.cam-card')];
+            const step = btn.classList.contains('cam-fs-next') ? 1 : -1;
+            const next = cards[(cards.indexOf(card) + step + cards.length) % cards.length];
+            // Switching the fullscreen element fires fullscreenchange, which
+            // moves the high-res stream to the new card.
+            next.requestFullscreen().catch(() => {});
+        });
+    });
+
+    function tickClock() {
+        const now = new Date().toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', second: '2-digit'});
+        document.querySelectorAll('.cam-fs-clock').forEach(c => { c.textContent = now; });
+    }
+    setInterval(() => { if (document.fullscreenElement) tickClock(); }, 1000);
+    document.addEventListener('fullscreenchange', tickClock);
 
     // PTZ preset buttons
     document.querySelectorAll('.ptz-btn').forEach(btn => {
