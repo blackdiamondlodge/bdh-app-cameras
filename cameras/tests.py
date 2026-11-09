@@ -642,7 +642,7 @@ class HeroLayoutTests(TestCase):
             ['Front Bell', 'Backyard', 'Garage', 'Hot Tub', 'Side Yard'],
         )
         content = response.content.decode()
-        self.assertIn('has-hero', content)
+        self.assertIn(' has-hero"', content)
         self.assertEqual(content.count('cam-card hero'), 1)
 
     def test_doorbell_matched_by_name(self):
@@ -664,7 +664,7 @@ class HeroLayoutTests(TestCase):
         self.assertFalse(site['hero'])
         self.assertEqual([s['display_name'] for s in site['streams']], names)
         content = response.content.decode()
-        self.assertNotIn('has-hero', content)
+        self.assertNotIn(' has-hero"', content)
         self.assertNotIn('cam-card hero', content)
 
 
