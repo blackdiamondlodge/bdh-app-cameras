@@ -2,18 +2,6 @@
 
 {% block title %}Cameras{% endblock %}
 
-{% block navbar_extras %}
-{% if sites|length > 1 %}
-<div class="navbar-extras">
-    <div class="site-tabs">
-        {% for site in sites %}
-        <button type="button" class="site-tab navbar-toggle-btn{% if forloop.first %} active{% endif %}" data-site="{{ forloop.counter0 }}"><i class="fas fa-location-dot me-1"></i>{{ site.name }}</button>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
-{% endblock %}
-
 {% block content %}
 <style>
     body {
@@ -23,7 +11,29 @@
         overflow: hidden;
     }
 
-    .site-tabs { display: flex; gap: 6px; }
+    /* Site switch: a slim frosted segmented bar above the camera wall */
+    .sitebar { display: flex; justify-content: center; padding: 12px 14px 0; max-width: 1920px; margin: 0 auto; }
+    .site-tabs {
+        display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px;
+        background: rgba(10,18,28,.55); border: 1px solid rgba(255,255,255,.1);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 10px 28px rgba(0,0,0,.3);
+    }
+    .site-tab {
+        height: 42px; min-width: 150px; padding: 0 20px; border-radius: 999px; border: 0;
+        background: transparent; color: #8fa3bd; font-size: 15px; font-weight: 600; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; gap: 9px;
+        transition: background .15s ease, color .15s ease;
+    }
+    .site-tab:hover { color: #eef3fa; }
+    .site-tab.active {
+        background: linear-gradient(135deg, rgba(124,196,255,.22), rgba(91,164,230,.14));
+        color: #eef3fa; box-shadow: inset 0 0 0 1px rgba(124,196,255,.45);
+    }
+    .site-tab.active i { color: #7cc4ff; }
+    @media (min-width: 1201px) {
+        .sitebar ~ .camera-grid { height: calc(100vh - 62px - 54px); }
+    }
 
     .site-panel { display: none; }
     .site-panel.active { display: grid; }
@@ -284,6 +294,9 @@
         }
         .camera-grid.has-hero .cam-card.hero { grid-column: auto; grid-row: auto; }
         .cam-card { aspect-ratio: 16 / 9; }
+        .sitebar { padding: 10px 10px 0; }
+        .site-tabs { display: flex; width: 100%; }
+        .site-tab { flex: 1; min-width: 0; padding: 0 10px; font-size: 14px; }
     }
 
     /* 2-column for medium screens, hero spans the full width */
@@ -298,6 +311,16 @@
         .cam-card { aspect-ratio: 16 / 9; }
     }
 </style>
+
+{% if sites|length > 1 %}
+<div class="sitebar">
+    <div class="site-tabs" role="group" aria-label="Location">
+        {% for site in sites %}
+        <button type="button" class="site-tab{% if forloop.first %} active{% endif %}" data-site="{{ forloop.counter0 }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}"><i class="fas fa-location-dot"></i>{{ site.name }}</button>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {% for site in sites %}
 <div class="camera-grid site-panel{% if forloop.first %} active{% endif %}{% if site.hero %} has-hero{% else %} n{{ site.streams|length }}{% endif %}" data-site="{{ forloop.counter0 }}">
@@ -482,8 +505,12 @@
             if (oldPanel) stopStreams(oldPanel);
 
             // Update tab styles
-            document.querySelectorAll('.site-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.site-tab').forEach(t => {
+                t.classList.remove('active');
+                t.setAttribute('aria-pressed', 'false');
+            });
             tab.classList.add('active');
+            tab.setAttribute('aria-pressed', 'true');
 
             // Show/hide panels
             document.querySelectorAll('.site-panel').forEach(p => p.classList.remove('active'));
