@@ -23,14 +23,15 @@ class CameraConfigTests(TestCase):
             "UNIFI_PROTECT_HOST_1": "10.0.0.1", "UNIFI_PROTECT_API_KEY_1": "k1",
             "BDH_CAMERAS_PROTECT_HOST_2": "10.0.0.2", "BDH_CAMERAS_PROTECT_API_KEY_2": "k2",
             "BDH_CAMERAS_PROTECT_NAME_2": "Shop",
+            "BDH_CAMERAS_PROTECT_USERNAME_2": "viewer", "BDH_CAMERAS_PROTECT_PASSWORD_2": "pw",
             "UNIFI_PROTECT_HOST_3": "10.0.0.3",  # no key: ignored
         }
         with self.settings(), patch.dict("os.environ", env):
             if hasattr(settings, "UNIFI_PROTECT_SITES"):
                 del settings.UNIFI_PROTECT_SITES
             self.assertEqual(config.protect_sites(), [
-                {"host": "10.0.0.1", "api_key": "k1", "name": "Site 1"},
-                {"host": "10.0.0.2", "api_key": "k2", "name": "Shop"},
+                {"host": "10.0.0.1", "api_key": "k1", "name": "Site 1", "username": "", "password": ""},
+                {"host": "10.0.0.2", "api_key": "k2", "name": "Shop", "username": "viewer", "password": "pw"},
             ])
 
     @override_settings(UNIFI_PROTECT_SITES=[{"host": "h", "api_key": "k", "name": "S"}])
@@ -1920,3 +1921,262 @@ class HomepageStatusTests(TestCase):
         from .homepage import status
         mock_get.return_value = []
         self.assertIsNone(status())
+
+
+# --- Protect events (private API) ---
+
+from datetime import datetime, timedelta, timezone as dt_tz  # noqa: E402
+from django.utils import timezone as dj_tz  # noqa: E402
+from . import events as ev_mod  # noqa: E402
+from .models import ProtectEvent  # noqa: E402
+
+
+def _ev(event_id, kinds, minutes_ago=5, camera_id="cam1", thumb=None):
+    start = dj_tz.now() - timedelta(minutes=minutes_ago)
+    return ProtectEvent.objects.create(
+        event_id=event_id, site="Test Site", host="192.168.10.1", camera_id=camera_id,
+        camera_name="Front Door", kinds=kinds, start=start, end=start + timedelta(seconds=20),
+        score=80, thumbnail=thumb,
+    )
+
+
+class EventKindTests(TestCase):
+    def test_kinds_for(self):
+        self.assertEqual(ev_mod.kinds_for("ring", []), ["doorbell"])
+        self.assertEqual(ev_mod.kinds_for("smartDetectZone", ["person", "face", "vehicle"]), ["person", "vehicle"])
+        self.assertEqual(ev_mod.kinds_for("smartDetectLine", ["licensePlate", "pet"]), ["vehicle", "animal"])
+        self.assertEqual(ev_mod.kinds_for("motion", []), ["motion"])
+        # Motion carrying smart types duplicates its smartDetect event.
+        self.assertEqual(ev_mod.kinds_for("motion", ["person"]), [])
+        self.assertEqual(ev_mod.kinds_for("smartDetectZone", ["speak"]), [])
+        self.assertEqual(ev_mod.kinds_for("sensorOpened", []), [])
+
+    def test_normalize_raw(self):
+        row = ev_mod.normalize_raw({
+            "id": "e1", "type": "smartDetectZone", "smartDetectTypes": ["person"],
+            "camera": "cam1", "start": 1_700_000_000_000, "end": None, "score": 91,
+        })
+        self.assertEqual(row["kinds"], ["person"])
+        self.assertEqual(row["start"], datetime.fromtimestamp(1_700_000_000, tz=dt_tz.utc))
+        self.assertIsNone(row["end"])
+        self.assertIsNone(ev_mod.normalize_raw({"id": "e2", "type": "motion", "smartDetectTypes": ["person"],
+                                                "camera": "cam1", "start": 1}))
+        self.assertIsNone(ev_mod.normalize_raw({"id": "e3", "type": "ring", "camera": None, "start": 1}))
+
+
+class EventStorageTests(TestCase):
+    def setUp(self):
+        # _db() closes connections, which would break TestCase's transaction.
+        p = patch.object(ev_mod, "close_old_connections")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_save_upserts_and_reports_missing_thumbs(self):
+        start = dj_tz.now()
+        row = {"event_id": "e1", "camera_id": "cam1", "kinds": ["person"], "start": start, "end": None, "score": 50}
+        self.assertEqual(ev_mod._save("S", "h", {"cam1": "Front"}, [row]), [])  # ongoing: no thumb yet
+        row["end"] = start + timedelta(seconds=10)
+        self.assertEqual(ev_mod._save("S", "h", {"cam1": "Front"}, [row]), [("e1", ["person"])])
+        self.assertEqual(ProtectEvent.objects.count(), 1)
+        self.assertEqual(ProtectEvent.objects.get().camera_name, "Front")
+        ev_mod._save_thumb("e1", b"jpg")
+        self.assertEqual(ev_mod._save("S", "h", {}, [row]), [])
+
+    def test_prune_drops_older_than_24h(self):
+        _ev("old", ["person"], minutes_ago=25 * 60)
+        _ev("new", ["person"], minutes_ago=60)
+        self.assertEqual(ev_mod.prune(), 1)
+        self.assertEqual(list(ProtectEvent.objects.values_list("event_id", flat=True)), ["new"])
+
+
+class EventWorkerStartTests(TestCase):
+    def test_should_start(self):
+        with patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("BDH_CAMERAS_EVENTS", None)
+            env.pop("RUN_MAIN", None)
+            self.assertTrue(ev_mod.should_start(["/app/.venv/bin/daphne", "x.asgi:application"]))
+            self.assertFalse(ev_mod.should_start(["manage.py", "test"]))
+            self.assertFalse(ev_mod.should_start(["manage.py", "migrate"]))
+            self.assertFalse(ev_mod.should_start(["manage.py", "runserver"]))
+            self.assertTrue(ev_mod.should_start(["manage.py", "runserver", "--noreload"]))
+            env["RUN_MAIN"] = "true"
+            self.assertTrue(ev_mod.should_start(["manage.py", "runserver"]))
+            env["BDH_CAMERAS_EVENTS"] = "off"
+            self.assertFalse(ev_mod.should_start(["daphne"]))
+
+    @override_settings(UNIFI_PROTECT_SITES=[
+        {"host": "h1", "api_key": "k", "name": "A", "username": "u", "password": "p"},
+        {"host": "h2", "api_key": "k", "name": "B"},
+    ])
+    def test_start_only_sites_with_accounts(self):
+        with patch.object(ev_mod, "_workers", {}), patch.object(ev_mod, "_started", False), \
+                patch.object(ev_mod.SiteWorker, "start") as mock_start:
+            ev_mod.start()
+            ev_mod.start()
+            self.assertEqual(list(ev_mod._workers), ["h1"])
+            mock_start.assert_called_once()
+
+
+class RingAlertTests(TestCase):
+    def _handle(self, kinds, seconds_ago, added=True, popup=True):
+        import asyncio
+        worker = ev_mod.SiteWorker({"name": "S", "host": "h", "username": "u", "password": "p"})
+        worker.names = {"cam1": "Doorbell"}
+        row = {"event_id": "r1", "camera_id": "cam1", "kinds": kinds,
+               "start": datetime.now(dt_tz.utc) - timedelta(seconds=seconds_ago), "end": None, "score": 0}
+
+        async def fake_in_db(fn, *args):
+            return [] if fn is ev_mod._save else fn(*args)
+        worker._in_db = fake_in_db
+        pushed = []
+
+        async def fake_push(*args):
+            pushed.append(args)
+        with patch.object(ev_mod, "_push_ring_alert", fake_push), \
+                patch("cameras.config.doorbell_popup", return_value=popup), \
+                patch("cameras.config.popup_seconds", return_value=45):
+            asyncio.run(worker._handle(row, added))
+        return pushed
+
+    def test_fresh_ring_pushes_alert(self):
+        self.assertEqual(self._handle(["doorbell"], 2), [("cam1", "Doorbell", 45)])
+
+    def test_old_or_updated_or_non_ring_does_not_push(self):
+        self.assertEqual(self._handle(["doorbell"], 120), [])
+        self.assertEqual(self._handle(["doorbell"], 2, added=False), [])
+        self.assertEqual(self._handle(["person"], 2), [])
+
+    def test_popup_setting_off(self):
+        self.assertEqual(self._handle(["doorbell"], 2, popup=False), [])
+
+    def test_push_builds_alert(self):
+        import asyncio
+        import sys
+        import types
+        fake = types.ModuleType("bdh_sdk.alerts")
+        fake.Alert = lambda **kw: kw
+        fake.push = MagicMock()
+        with patch.dict(sys.modules, {"bdh_sdk.alerts": fake}), \
+                patch("bdh_sdk.alerts", fake, create=True):
+            asyncio.run(ev_mod._push_ring_alert("cam1", "Front", 45))
+        fake.push.assert_called_once_with({
+            "app": "cameras", "key": "doorbell:cam1", "title": "Someone's at the door (Front)",
+            "embed_url": "/cameras/popup/cam1/", "ttl": 45,
+        })
+
+
+class EventViewTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user("admin", password="x", is_staff=True)
+        self.guest = User.objects.create_user("guest", password="x")
+        _ev("p1", ["person"], minutes_ago=10, thumb=b"jpg")
+        _ev("m1", ["motion"], minutes_ago=5)
+        _ev("d1", ["doorbell"], minutes_ago=1)
+
+    def _admin(self):
+        c = Client()
+        c.force_login(self.admin)
+        return c
+
+    def test_history_endpoints_are_admin_only(self):
+        anon, guest = Client(), Client()
+        guest.force_login(self.guest)
+        for c in (anon, guest):
+            for url in ("/cameras/events/", "/cameras/events/p1/thumb/",
+                        "/cameras/snapshot/cam1/?ts=1700000000", "/cameras/clip/cam1/?start=1700000000"):
+                self.assertEqual(c.get(url).status_code, 403, url)
+
+    def test_events_filtered_to_enabled_kinds(self):
+        data = self._admin().get("/cameras/events/").json()
+        self.assertEqual([e["id"] for e in data["events"]], ["d1", "p1"])  # motion is off by default
+        self.assertNotIn("motion", data["kinds"])
+        with patch("cameras.views.config.enabled_event_kinds", return_value=["motion"]):
+            data = self._admin().get("/cameras/events/").json()
+        self.assertEqual([e["id"] for e in data["events"]], ["m1"])
+
+    def test_thumb_from_db(self):
+        resp = self._admin().get("/cameras/events/p1/thumb/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, b"jpg")
+
+    def test_thumb_fetched_through_worker(self):
+        with patch("cameras.views.events.thumbnail", return_value=b"new") as fetch:
+            resp = self._admin().get("/cameras/events/d1/thumb/")
+        self.assertEqual(resp.content, b"new")
+        fetch.assert_called_once_with("d1", "192.168.10.1", "cam1")
+
+    def test_no_worker_is_503(self):
+        with patch.object(ev_mod, "_workers", {}):
+            c = self._admin()
+            self.assertEqual(c.get("/cameras/snapshot/cam1/?ts=1700000000").status_code, 503)
+            self.assertEqual(c.get("/cameras/clip/cam1/?start=1700000000").status_code, 503)
+            self.assertEqual(c.get("/cameras/events/d1/thumb/").status_code, 503)
+
+    def test_snapshot_parses_ts(self):
+        client = MagicMock()
+        with patch("cameras.views.events.run", side_effect=lambda cam, fn, **kw: fn(client)):
+            client.get_camera_snapshot.return_value = b"img"
+            resp = self._admin().get("/cameras/snapshot/cam1/?ts=1700000000000&w=5000")
+        self.assertEqual(resp.content, b"img")
+        client.get_camera_snapshot.assert_called_once_with(
+            "cam1", width=1920, dt=datetime.fromtimestamp(1_700_000_000, tz=dt_tz.utc))
+
+    def test_clip_window_is_capped(self):
+        client = MagicMock()
+        client.get_camera_video.return_value = b"mp4"
+        start = 1_700_000_000
+        with patch("cameras.views.events.run", side_effect=lambda cam, fn, **kw: fn(client)):
+            resp = self._admin().get(f"/cameras/clip/cam1/?start={start}&end={start + 3600}")
+            self.assertEqual(resp["Content-Type"], "video/mp4")
+            _, s, e = client.get_camera_video.call_args.args
+            self.assertEqual((e - s).total_seconds(), 120)
+            self.assertEqual(self._admin().get("/cameras/clip/cam1/").status_code, 400)
+            future = int(dj_tz.now().timestamp()) + 600
+            self.assertEqual(self._admin().get(f"/cameras/clip/cam1/?start={future}").status_code, 400)
+
+
+@override_settings(
+    GO2RTC_URL='http://localhost:1984',
+    UNIFI_PROTECT_SITES=[{'host': '192.168.10.1', 'api_key': 'k', 'name': 'Test Site'}],
+)
+class EventTemplateTests(TestCase):
+    CAMS = [{'name': 'Test Site', 'host': '192.168.10.1', 'cameras': [
+        {'name': 'Front Door', 'stream_name': 'front_door', 'rtsp_url': 'rtsps://x',
+         'rtsp_url_low': 'rtsps://x_low', 'camera_id': 'cam1', 'is_ptz': False, 'ptz_presets': 0},
+    ]}]
+
+    def setUp(self):
+        clear_cache()
+
+    @patch("cameras.views._register_streams_with_go2rtc")
+    @patch("cameras.views.get_protect_cameras")
+    def test_guest_sees_live_only(self, mock_cameras, _):
+        mock_cameras.return_value = self.CAMS
+        html = Client().get("/cameras/").content.decode()
+        self.assertIn('data-camera-id="cam1"', html)
+        self.assertNotIn('ev-rail', html)
+        self.assertNotIn('cam-scrub', html)
+
+    @patch("cameras.views._register_streams_with_go2rtc")
+    @patch("cameras.views.get_protect_cameras")
+    def test_admin_sees_rail_and_scrubber(self, mock_cameras, _):
+        mock_cameras.return_value = self.CAMS
+        c = Client()
+        c.force_login(User.objects.create_user("a", password="x", is_staff=True))
+        html = c.get("/cameras/").content.decode()
+        self.assertIn('class="ev-rail"', html)
+        self.assertIn('class="cam-scrub"', html)
+        self.assertIn('data-kind="person"', html)
+        self.assertNotIn('data-kind="motion"', html)
+
+    @patch("cameras.views._register_streams_with_go2rtc")
+    @patch("cameras.views.get_protect_cameras")
+    def test_popup_is_public_and_live_only(self, mock_cameras, mock_register):
+        mock_cameras.return_value = self.CAMS
+        resp = Client().get("/cameras/popup/cam1/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["X-Frame-Options"], "SAMEORIGIN")
+        self.assertContains(resp, 'data-stream-name="front_door"')
+        self.assertNotContains(resp, "cam-scrub")
+        mock_register.assert_called_once()
+        self.assertEqual(Client().get("/cameras/popup/nope/").status_code, 404)
