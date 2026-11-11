@@ -4,15 +4,23 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone as dt_timezone
+from functools import wraps
 
-from django.http import JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.http import require_POST
+from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
+from django.views.decorators.http import require_GET, require_POST
 
-from . import config
+from . import config, events
+from .models import ProtectEvent
 from .protect_api import get_protect_cameras, ptz_goto_preset
 
 logger = logging.getLogger(__name__)
+
+CLIP_DEFAULT = timedelta(seconds=30)
+CLIP_MAX = timedelta(seconds=120)
 
 
 def get_go2rtc_streams(go2rtc_url):
@@ -179,6 +187,169 @@ def camera_feed_view(request):
         'sites': sites,
         'go2rtc_url': go2rtc_url,
         'go2rtc_port': go2rtc_port,
+        'is_admin': _is_admin(request),
+        'event_kinds': config.enabled_event_kinds(),
+    })
+
+
+def _is_admin(request):
+    user = getattr(request, 'user', None)
+    return bool(user and user.is_authenticated and user.is_staff)
+
+
+def admin_only(view):
+    """Recordings and history are for signed-in staff only; guests get live view."""
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        if not _is_admin(request):
+            return JsonResponse({'error': 'forbidden'}, status=403)
+        return view(request, *args, **kwargs)
+    return wrapped
+
+
+def _unavailable(err=None):
+    if err is not None:
+        logger.warning("Protect request failed: %s", err)
+    return JsonResponse({'error': 'camera history unavailable'}, status=503)
+
+
+def _parse_ts(value):
+    """Unix seconds or ms (or ISO 8601) -> aware UTC datetime, else None."""
+    if not value:
+        return None
+    try:
+        num = float(value)
+    except ValueError:
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=dt_timezone.utc)
+    if num > 1e11:
+        num /= 1000
+    return datetime.fromtimestamp(num, tz=dt_timezone.utc)
+
+
+@admin_only
+@require_GET
+def events_json(request):
+    """Last 24 hours of Protect events, filtered to the enabled kinds."""
+    enabled = config.enabled_event_kinds()
+    since = timezone.now() - events.HISTORY
+    out = []
+    for ev in ProtectEvent.objects.filter(start__gte=since).defer('thumbnail'):
+        kinds = [k for k in ev.kinds if k in enabled]
+        if not kinds:
+            continue
+        out.append({
+            'id': ev.event_id,
+            'site': ev.site,
+            'camera_id': ev.camera_id,
+            'camera_name': ev.camera_name,
+            'kinds': kinds,
+            'start': int(ev.start.timestamp() * 1000),
+            'end': int(ev.end.timestamp() * 1000) if ev.end else None,
+            'score': ev.score,
+        })
+    return JsonResponse({'events': out, 'kinds': enabled, 'live': events.available()})
+
+
+@admin_only
+@require_GET
+def event_thumb(request, event_id):
+    ev = ProtectEvent.objects.filter(event_id=event_id).first()
+    if ev is None:
+        raise Http404
+    data = bytes(ev.thumbnail) if ev.thumbnail else None
+    if data is None:
+        try:
+            data = events.thumbnail(ev.event_id, ev.host, ev.camera_id)
+        except events.WorkerUnavailable:
+            return _unavailable()
+        except Exception as err:
+            return _unavailable(err)
+        if not data:
+            raise Http404
+    resp = HttpResponse(data, content_type='image/jpeg')
+    resp['Cache-Control'] = 'private, max-age=86400'
+    return resp
+
+
+@admin_only
+@require_GET
+def snapshot(request, camera_id):
+    """A still from the recording at ``ts`` (or now)."""
+    dt = _parse_ts(request.GET.get('ts'))
+    try:
+        width = min(max(int(request.GET.get('w', 960)), 160), 1920)
+    except ValueError:
+        width = 960
+    try:
+        data = events.run(
+            camera_id,
+            lambda client: client.get_camera_snapshot(camera_id, width=width, dt=dt),
+        )
+    except events.WorkerUnavailable:
+        return _unavailable()
+    except Exception as err:
+        return _unavailable(err)
+    if not data:
+        raise Http404
+    resp = HttpResponse(data, content_type='image/jpeg')
+    resp['Cache-Control'] = 'private, max-age=3600' if dt else 'no-store'
+    return resp
+
+
+@admin_only
+@require_GET
+def clip(request, camera_id):
+    """An MP4 export of a recording window (at most CLIP_MAX seconds)."""
+    start = _parse_ts(request.GET.get('start'))
+    end = _parse_ts(request.GET.get('end'))
+    if start is None:
+        return JsonResponse({'error': 'start required'}, status=400)
+    if end is None or end <= start:
+        end = start + CLIP_DEFAULT
+    end = min(end, start + CLIP_MAX, timezone.now())
+    if end <= start:
+        return JsonResponse({'error': 'start is in the future'}, status=400)
+    try:
+        data = events.run(
+            camera_id,
+            lambda client: client.get_camera_video(camera_id, start, end),
+            timeout=90,
+        )
+    except events.WorkerUnavailable:
+        return _unavailable()
+    except Exception as err:
+        return _unavailable(err)
+    if not data:
+        raise Http404
+    resp = HttpResponse(data, content_type='video/mp4')
+    resp['Cache-Control'] = 'private, max-age=3600'
+    return resp
+
+
+@xframe_options_sameorigin
+@require_GET
+def popup(request, camera_id):
+    """Chrome-less live view for the hub's doorbell pop-up (live only, no history)."""
+    camera = None
+    for site in get_protect_cameras():
+        for cam in site.get('cameras', []):
+            if cam.get('camera_id') == camera_id:
+                camera = cam
+                break
+        if camera:
+            break
+    if camera is None:
+        raise Http404
+    _register_streams_with_go2rtc(config.go2rtc_url(), [camera])
+    from urllib.parse import urlparse
+    return render(request, 'cameras/popup.html', {
+        'stream': camera['stream_name'],
+        'name': camera['name'],
+        'go2rtc_port': urlparse(config.go2rtc_url()).port or 1984,
     })
 
 
