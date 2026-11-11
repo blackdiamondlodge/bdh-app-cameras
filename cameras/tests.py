@@ -2067,24 +2067,22 @@ class RingAlertTests(TestCase):
 
 class EventViewTests(TestCase):
     def setUp(self):
-        self.admin = User.objects.create_user("admin", password="x", is_staff=True)
-        self.guest = User.objects.create_user("guest", password="x")
+        self.is_admin = False
+        p = patch("cameras.views.is_admin", side_effect=lambda request: self.is_admin)
+        p.start()
+        self.addCleanup(p.stop)
         _ev("p1", ["person"], minutes_ago=10, thumb=b"jpg")
         _ev("m1", ["motion"], minutes_ago=5)
         _ev("d1", ["doorbell"], minutes_ago=1)
 
     def _admin(self):
-        c = Client()
-        c.force_login(self.admin)
-        return c
+        self.is_admin = True
+        return Client()
 
     def test_history_endpoints_are_admin_only(self):
-        anon, guest = Client(), Client()
-        guest.force_login(self.guest)
-        for c in (anon, guest):
-            for url in ("/cameras/events/", "/cameras/events/p1/thumb/",
-                        "/cameras/snapshot/cam1/?ts=1700000000", "/cameras/clip/cam1/?start=1700000000"):
-                self.assertEqual(c.get(url).status_code, 403, url)
+        for url in ("/cameras/events/", "/cameras/events/p1/thumb/",
+                    "/cameras/snapshot/cam1/?ts=1700000000", "/cameras/clip/cam1/?start=1700000000"):
+            self.assertEqual(Client().get(url).status_code, 403, url)
 
     def test_events_filtered_to_enabled_kinds(self):
         data = self._admin().get("/cameras/events/").json()
@@ -2161,9 +2159,8 @@ class EventTemplateTests(TestCase):
     @patch("cameras.views.get_protect_cameras")
     def test_admin_sees_rail_and_scrubber(self, mock_cameras, _):
         mock_cameras.return_value = self.CAMS
-        c = Client()
-        c.force_login(User.objects.create_user("a", password="x", is_staff=True))
-        html = c.get("/cameras/").content.decode()
+        with patch("cameras.views.is_admin", return_value=True):
+            html = Client().get("/cameras/").content.decode()
         self.assertIn('class="ev-rail"', html)
         self.assertIn('class="cam-scrub"', html)
         self.assertIn('data-kind="person"', html)

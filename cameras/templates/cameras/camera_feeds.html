@@ -321,9 +321,24 @@
         position: fixed; top: 62px; right: 0; bottom: 0; width: var(--rail-w); box-sizing: border-box;
         display: flex; flex-direction: column; padding: 14px 14px 14px 0; gap: 10px; z-index: 5;
     }
-    .ev-rail-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px; }
-    .ev-rail-head h2 { margin: 0; font-size: 13px; letter-spacing: .12em; color: #9fb0c8; font-weight: 700; }
-    .ev-rail-head .ev-count { font-size: 12px; color: #9fb0c8; }
+    .ev-rail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px; }
+    .ev-toggle {
+        flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; border: 1px solid #26354f;
+        background: #18243a; color: #c8d4e6; cursor: pointer; display: grid; place-items: center;
+    }
+    .ev-toggle i { transition: transform .25s ease; }
+    body.rail-collapsed { --rail-w: 64px; }
+    body.rail-collapsed .ev-rail h2, body.rail-collapsed .ev-chips, body.rail-collapsed .ev-list-wrap { display: none; }
+    body.rail-collapsed .ev-toggle i { transform: rotate(180deg); }
+    @media (min-width: 1201px) {
+        body.rail-collapsed .ev-rail-head { flex-direction: column-reverse; padding: 0; gap: 10px; }
+    }
+    @media (max-width: 1200px) {
+        .ev-toggle i { transform: rotate(90deg); }
+        body.rail-collapsed .ev-toggle i { transform: rotate(-90deg); }
+    }
+    .ev-rail-head h2 { margin: 0 auto 0 0; font-size: 13px; letter-spacing: .12em; color: #9fb0c8; font-weight: 700; }
+    .ev-rail-head .ev-count { font-size: 12px; color: #9fb0c8; text-align: center; }
     .ev-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .ev-chip {
         border: 1px solid #26354f; background: #18243a; color: #c8d4e6; border-radius: 999px;
@@ -331,10 +346,22 @@
     }
     .ev-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #5ba4e6); }
     .ev-chip.active { background: rgba(91,164,230,.18); border-color: #5ba4e6; color: #fff; }
+    .ev-list-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
     .ev-list {
         flex: 1; overflow-y: auto; border-radius: 16px; background: rgba(24,36,58,.7);
-        border: 1px solid #26354f; padding: 6px; scrollbar-width: thin;
+        border: 1px solid #26354f; padding: 6px; scrollbar-width: none;
+        overscroll-behavior: contain;
     }
+    .ev-list::-webkit-scrollbar { display: none; }
+    /* Same bouncing chevron as the snow report / device control apps, scoped to the list. */
+    .ev-scroll-hint {
+        position: absolute; left: 1px; right: 1px; bottom: 1px; height: 64px; border-radius: 0 0 15px 15px;
+        background: linear-gradient(transparent, #18243a); display: flex; justify-content: center;
+        align-items: flex-end; padding-bottom: 8px; pointer-events: none; transition: opacity .4s ease;
+    }
+    .ev-scroll-hint.hidden { opacity: 0; }
+    .ev-scroll-hint i { color: rgba(255,255,255,.6); font-size: 22px; animation: ev-bounce 1.5s infinite; }
+    @keyframes ev-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
     .ev-day { font-size: 11px; letter-spacing: .1em; color: #9fb0c8; padding: 10px 8px 6px; text-transform: uppercase; }
     .ev-item {
         display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; padding: 6px;
@@ -387,17 +414,43 @@
         display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     }
     .scrub-btn.on { border-color: #5ba4e6; background: rgba(91,164,230,.2); }
-    .scrub-live { margin-left: auto; color: #ff6b6b; }
+    .scrub-live { margin-left: auto; color: #eef3fa; letter-spacing: .04em; }
+    .scrub-live .live-dot { display: none; font-size: 10px; }
+    .scrub-live .live-behind { color: #9fb0c8; font-variant-numeric: tabular-nums; }
+    .scrub-live .live-behind::after { content: '·'; margin-left: 6px; color: #5b6b82; }
+    .scrub-live .live-skip { font-size: 12px; color: #9fb0c8; }
     .scrub-live.on { color: #fff; background: #d83a3a; border-color: #d83a3a; }
+    .scrub-live.on .live-dot { display: inline-block; animation: live-pulse 2s ease-in-out infinite; }
+    .scrub-live.on .live-behind, .scrub-live.on .live-skip { display: none; }
+    @keyframes live-pulse { 50% { opacity: .35; } }
     .scrub-time { font-size: 16px; font-weight: 700; min-width: 170px; text-align: center; font-variant-numeric: tabular-nums; }
     .scrub-sep { width: 1px; height: 28px; background: #26354f; margin: 0 6px; }
     .scrub-track {
-        position: relative; height: 56px; border-radius: 12px; background: #18243a; border: 1px solid #26354f;
+        position: relative; height: 72px; border-radius: 12px; background: #18243a; border: 1px solid #26354f;
         touch-action: none; cursor: pointer; overflow: hidden;
     }
+    .scrub-strip { position: absolute; inset: 0; pointer-events: none; }
+    .scrub-frame {
+        position: absolute; top: 0; bottom: 0; object-fit: cover; opacity: 0; transition: opacity .3s ease;
+        border-right: 1px solid rgba(4,8,14,.6);
+    }
+    .scrub-frame.ready { opacity: .55; }
     .scrub-ticks { position: absolute; inset: 0; pointer-events: none; }
-    .scrub-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.06); }
-    .scrub-tick span { position: absolute; bottom: 4px; left: 4px; font-size: 10px; color: #9fb0c8; white-space: nowrap; }
+    .scrub-tick { position: absolute; bottom: 0; height: 18px; width: 1px; background: rgba(255,255,255,.3); }
+    .scrub-tick.major { top: 0; height: auto; background: rgba(255,255,255,.45); }
+    .scrub-tick span {
+        position: absolute; bottom: 4px; left: 4px; font-size: 11px; font-weight: 600; color: #e6edf7; white-space: nowrap;
+        text-shadow: 0 0 3px #000, 0 0 6px #000;
+    }
+    .scrub-pop {
+        position: absolute; bottom: 150px; width: 240px; margin-left: -120px; border-radius: 10px; overflow: hidden;
+        background: #0d1626; border: 2px solid var(--c, #5ba4e6); box-shadow: 0 6px 24px rgba(0,0,0,.6);
+        opacity: 0; transform: translateY(6px); transition: opacity .15s ease, transform .15s ease; pointer-events: none;
+    }
+    .scrub-pop.show { opacity: 1; transform: none; }
+    .scrub-pop img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #18243a; }
+    .scrub-pop-meta { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600; }
+    .scrub-pop-kind { color: var(--c, #5ba4e6); }
     .scrub-mark {
         position: absolute; top: 8px; height: 22px; min-width: 4px; border-radius: 3px; background: var(--c, #5ba4e6);
         opacity: .9; pointer-events: none;
@@ -462,9 +515,11 @@
                 <button type="button" class="scrub-btn" data-zoom="1">1h</button>
                 <button type="button" class="scrub-btn on" data-zoom="6">6h</button>
                 <button type="button" class="scrub-btn" data-zoom="24">24h</button>
-                <button type="button" class="scrub-btn scrub-live on" data-act="live"><i class="fas fa-circle"></i> LIVE</button>
+                <button type="button" class="scrub-btn scrub-live on" data-act="live" aria-label="Go live"><i class="fas fa-circle live-dot"></i><span class="live-behind"></span>LIVE<i class="fas fa-forward live-skip"></i></button>
             </div>
+            <div class="scrub-pop"><img alt=""><div class="scrub-pop-meta"><span class="scrub-pop-kind"></span><span class="scrub-pop-time"></span></div></div>
             <div class="scrub-track">
+                <div class="scrub-strip"></div>
                 <div class="scrub-ticks"></div>
                 <div class="scrub-marks"></div>
                 <div class="scrub-head live"></div>
@@ -484,14 +539,17 @@
 
 {% if is_admin %}
 <aside class="ev-rail" aria-label="Camera events">
-    <div class="ev-rail-head"><h2>LAST 24 HOURS</h2><span class="ev-count"></span></div>
+    <div class="ev-rail-head"><h2>LAST 24 HOURS</h2><span class="ev-count"></span><button type="button" class="ev-toggle" aria-label="Collapse events" aria-expanded="true"><i class="fas fa-chevron-right"></i></button></div>
     <div class="ev-chips">
         <button type="button" class="ev-chip active" data-kind="">All</button>
         {% for kind in event_kinds %}
         <button type="button" class="ev-chip" data-kind="{{ kind }}" style="--c: var(--k-{{ kind }})"><span class="dot"></span>{{ kind|capfirst }}</button>
         {% endfor %}
     </div>
-    <div class="ev-list"><div class="ev-empty">Loading events…</div></div>
+    <div class="ev-list-wrap">
+        <div class="ev-list"><div class="ev-empty">Loading events…</div></div>
+        <div class="ev-scroll-hint hidden" aria-hidden="true"><i class="fas fa-chevron-down"></i></div>
+    </div>
 </aside>
 {% endif %}
 
@@ -778,12 +836,20 @@
 <script type="module">
     const EVENTS_URL = '{% url "camera_events" %}';
     const THUMB_URL = id => '{% url "camera_event_thumb" "EVID" %}'.replace('EVID', encodeURIComponent(id));
-    const SNAP_URL = (cam, ts) => '{% url "camera_snapshot" "CAMID" %}'.replace('CAMID', encodeURIComponent(cam)) + `?ts=${ts}&w=1280`;
+    const SNAP_URL = (cam, ts, w = 1280) => '{% url "camera_snapshot" "CAMID" %}'.replace('CAMID', encodeURIComponent(cam)) + `?ts=${ts}&w=${w}`;
     const CLIP_URL = (cam, s, e) => '{% url "camera_clip" "CAMID" %}'.replace('CAMID', encodeURIComponent(cam)) + `?start=${s}&end=${e}`;
     const KIND_ORDER = ['doorbell', 'person', 'vehicle', 'package', 'animal', 'motion'];
     const KIND_LABEL = {doorbell: 'Doorbell', person: 'Person', vehicle: 'Vehicle', package: 'Package', animal: 'Animal', motion: 'Motion'};
     const CHUNK_S = 30;
     const H = 3600 * 1000;
+    const SNAP_PX = 24;   // tap within this many px of an event mark snaps to its start
+    const DRAG_PX = 8;    // finger movement beyond this turns a tap into a free drag
+    const TICK_MIN = { 1: 5, 6: 15, 24: 60 };
+    const LABEL_PX = 64;  // min spacing between tick labels
+    // Filmstrip frame spacing (minutes) per zoom; slots are clock-aligned so past frames stay browser-cached.
+    const STRIP_MIN = { 1: 5, 6: 30, 24: 120 };
+    const STRIP_CONCURRENCY = 3;
+    const POP_LINGER_MS = 2000;
 
     let events = [];
     let filter = '';
@@ -791,6 +857,12 @@
     const kindColor = k => `var(--k-${k})`;
     const fmtTime = ms => new Date(ms).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
     const fmtFull = ms => new Date(ms).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', second: '2-digit'});
+    const fmtBehind = ms => {
+        const s = Math.max(0, Math.round(ms / 1000));
+        if (s < 60) return `−${s}s`;
+        const m = Math.floor(s / 60);
+        return m < 60 ? `−${m}m` : `−${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+    };
     const dayLabel = ms => {
         const d = new Date(ms), today = new Date();
         const y = new Date(today); y.setDate(today.getDate() - 1);
@@ -803,6 +875,27 @@
     const rail = document.querySelector('.ev-rail');
     const list = rail.querySelector('.ev-list');
     const count = rail.querySelector('.ev-count');
+    const hint = rail.querySelector('.ev-scroll-hint');
+
+    function updateHint() {
+        hint.classList.toggle('hidden', list.scrollTop + list.clientHeight >= list.scrollHeight - 8);
+    }
+    list.addEventListener('scroll', updateHint, {passive: true});
+    new ResizeObserver(updateHint).observe(list);
+
+    const toggle = rail.querySelector('.ev-toggle');
+    function setCollapsed(on) {
+        document.body.classList.toggle('rail-collapsed', on);
+        toggle.setAttribute('aria-expanded', String(!on));
+        toggle.setAttribute('aria-label', on ? 'Show events' : 'Collapse events');
+        try { localStorage.setItem('cameras.railCollapsed', on ? '1' : ''); } catch (e) {}
+        window.dispatchEvent(new Event('resize'));
+        updateHint();
+    }
+    let startCollapsed = false;
+    try { startCollapsed = localStorage.getItem('cameras.railCollapsed') === '1'; } catch (e) {}
+    setCollapsed(startCollapsed);
+    toggle.addEventListener('click', () => setCollapsed(!document.body.classList.contains('rail-collapsed')));
 
     // ---- Rail ----
     // Each site tab gets its own history: only events from cameras on the visible tab.
@@ -819,6 +912,7 @@
         count.textContent = shown.length ? `${shown.length} event${shown.length === 1 ? '' : 's'}` : '';
         if (!shown.length) {
             list.innerHTML = `<div class="ev-empty">${site.length ? 'No matching events' : 'No events in the last 24 hours'}</div>`;
+            updateHint();
             return;
         }
         const frag = document.createDocumentFragment();
@@ -850,6 +944,7 @@
             frag.appendChild(btn);
         }
         list.replaceChildren(frag);
+        updateHint();
     }
 
     rail.querySelectorAll('.ev-chip').forEach(chip => {
@@ -901,10 +996,16 @@
             this.track = this.bar.querySelector('.scrub-track');
             this.ticks = this.bar.querySelector('.scrub-ticks');
             this.marks = this.bar.querySelector('.scrub-marks');
+            this.strip = this.bar.querySelector('.scrub-strip');
+            this.pop = this.bar.querySelector('.scrub-pop');
+            this.frames = new Map();
+            this.frameQ = [];
+            this.frameLoading = 0;
             this.head = this.bar.querySelector('.scrub-head');
             this.timeEl = this.bar.querySelector('.scrub-time');
             this.playBtn = this.bar.querySelector('[data-act="play"]');
             this.liveBtn = this.bar.querySelector('[data-act="live"]');
+            this.liveBehind = this.liveBtn.querySelector('.live-behind');
             this.video = card.querySelector('.cam-replay');
             this.still = card.querySelector('.cam-still');
             this.zoomH = 6;
@@ -925,12 +1026,25 @@
             this.track.addEventListener('pointerdown', e => {
                 this.track.setPointerCapture(e.pointerId);
                 this.dragging = true;
+                this.downX = e.clientX;
+                this.moved = false;
+                // A tap on/near an event snaps to its start; dragging cancels the snap.
+                const ev = this.eventNear(e.clientX);
+                this.showPop(ev, e.clientX);
+                this.scrubTo(ev ? this.clampT(ev.start) : this.timeAt(e.clientX));
+            });
+            this.track.addEventListener('pointermove', e => {
+                if (!this.dragging) return;
+                if (!this.moved && Math.abs(e.clientX - this.downX) < DRAG_PX) return;
+                this.moved = true;
+                this.showPop(this.eventNear(e.clientX), e.clientX);
                 this.scrubTo(this.timeAt(e.clientX));
             });
-            this.track.addEventListener('pointermove', e => { if (this.dragging) this.scrubTo(this.timeAt(e.clientX)); });
             const end = () => {
                 if (!this.dragging) return;
                 this.dragging = false;
+                clearTimeout(this.popTimer);
+                this.popTimer = setTimeout(() => this.showPop(null), POP_LINGER_MS);
                 this.replay(this.t);
             };
             this.track.addEventListener('pointerup', end);
@@ -968,22 +1082,110 @@
             return Math.min(Date.now(), Math.max(Date.now() - 24 * H, a + f * (b - a)));
         }
         pct(ms) { const [a, b] = this.windowRange(); return ((ms - a) / (b - a)) * 100; }
+        clampT(t) { return Math.min(Date.now(), Math.max(Date.now() - 24 * H, t)); }
+        eventNear(clientX) {
+            const r = this.track.getBoundingClientRect();
+            const [a, b] = this.windowRange();
+            const x = clientX - r.left, pxPerMs = r.width / (b - a);
+            let best = null, bestD = SNAP_PX + 1, bestStartD = Infinity;
+            for (const ev of this.camEvents()) {
+                const x0 = (ev.start - a) * pxPerMs;
+                const x1 = Math.max(x0 + 4, ((ev.end || ev.start + 10000) - a) * pxPerMs);
+                const d = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
+                const startD = Math.abs(x - x0);
+                if (d < bestD || (d === bestD && startD < bestStartD)) { best = ev; bestD = d; bestStartD = startD; }
+            }
+            return best;
+        }
+        showPop(ev, clientX) {
+            if (!ev) {
+                this.pop.classList.remove('show');
+                this.popEv = null;
+                return;
+            }
+            clearTimeout(this.popTimer);
+            const br = this.bar.getBoundingClientRect(), half = this.pop.offsetWidth / 2 || 120;
+            const x = Math.min(br.width - half - 8, Math.max(half + 8, clientX - br.left));
+            this.pop.style.left = `${x}px`;
+            if (this.popEv !== ev.id) {
+                this.popEv = ev.id;
+                const k = primaryKind(ev);
+                this.pop.style.setProperty('--c', kindColor(k));
+                this.pop.querySelector('img').src = THUMB_URL(ev.id);
+                this.pop.querySelector('.scrub-pop-kind').textContent =
+                    ev.kinds.filter(x => KIND_LABEL[x]).map(x => KIND_LABEL[x]).join(' · ') || KIND_LABEL[k];
+                this.pop.querySelector('.scrub-pop-time').textContent = fmtFull(ev.start);
+            }
+            this.pop.classList.add('show');
+        }
+        renderStrip() {
+            const [a, b] = this.windowRange();
+            const fs = (STRIP_MIN[this.zoomH] || 30) * 60000;
+            if (this.stripFs !== fs) {
+                this.stripFs = fs;
+                for (const el of this.frames.values()) el.remove();
+                this.frames.clear();
+                this.frameQ = [];
+            }
+            const want = [];
+            for (let t = Math.floor(a / fs) * fs; t < b; t += fs) want.push(t);
+            const keep = new Set(want);
+            for (const [t, el] of this.frames) if (!keep.has(t)) { el.remove(); this.frames.delete(t); }
+            for (const t of want) {
+                let el = this.frames.get(t);
+                if (!el) {
+                    el = document.createElement('img');
+                    el.className = 'scrub-frame';
+                    el.alt = '';
+                    el.dataset.ts = Math.round(this.clampT(Math.min(t + fs / 2, Date.now() - 15000)) / 1000);
+                    this.frames.set(t, el);
+                    this.strip.appendChild(el);
+                    this.frameQ.push(el);
+                }
+                const l = this.pct(t);
+                el.style.left = `${l}%`;
+                el.style.width = `${this.pct(t + fs) - l}%`;
+            }
+            // Newest frames first: that's where people usually look.
+            this.frameQ.sort((x, y) => y.dataset.ts - x.dataset.ts);
+            this.pumpFrames();
+        }
+        pumpFrames() {
+            while (this.frameLoading < STRIP_CONCURRENCY && this.frameQ.length) {
+                const el = this.frameQ.shift();
+                if (!el.isConnected) continue;
+                this.frameLoading++;
+                el.onload = el.onerror = () => {
+                    this.frameLoading--;
+                    if (el.naturalWidth) el.classList.add('ready');
+                    if (document.fullscreenElement === this.card) this.pumpFrames();
+                };
+                el.src = SNAP_URL(this.cam, el.dataset.ts, 160);
+            }
+        }
 
         render() {
             if (document.fullscreenElement !== this.card) return;
             const [a, b] = this.windowRange();
-            const stepMin = this.zoomH <= 1 ? 10 : this.zoomH <= 6 ? 60 : 180;
+            const stepMin = TICK_MIN[this.zoomH] || 60;
             const step = stepMin * 60000;
+            const pxPerStep = this.track.clientWidth * step / (b - a);
+            const every = [1, 2, 3, 4, 6, 12].find(n => n * pxPerStep >= LABEL_PX) || 12;
             const ticks = [];
             for (let t = Math.ceil(a / step) * step; t < b; t += step) {
-                ticks.push(`<div class="scrub-tick" style="left:${this.pct(t)}%"><span>${fmtTime(t)}</span></div>`);
+                const major = Math.round(t / step) % every === 0;
+                ticks.push(major
+                    ? `<div class="scrub-tick major" style="left:${this.pct(t)}%"><span>${fmtTime(t)}</span></div>`
+                    : `<div class="scrub-tick" style="left:${this.pct(t)}%"></div>`);
             }
             this.ticks.innerHTML = ticks.join('');
+            this.renderStrip();
             this.renderMarks();
             const live = this.mode === 'live';
             this.head.classList.toggle('live', live);
             this.head.style.left = `${live ? 100 : this.pct(this.t)}%`;
             this.liveBtn.classList.toggle('on', live);
+            if (!live) this.liveBehind.textContent = fmtBehind(Date.now() - this.t);
             if (live) this.timeEl.textContent = 'Live';
             else if (!this.card.classList.contains('loading') || this.dragging) this.timeEl.textContent = fmtFull(this.t);
         }
@@ -1090,6 +1292,7 @@
     document.addEventListener('fullscreenchange', () => {
         scrubbers.forEach((s, card) => {
             if (document.fullscreenElement !== card && s.mode !== 'live') s.goLive();
+            if (document.fullscreenElement !== card) s.showPop(null);
         });
         scrubbers.get(document.fullscreenElement)?.render();
     });
