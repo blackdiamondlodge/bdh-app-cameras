@@ -1928,6 +1928,7 @@ class HomepageStatusTests(TestCase):
 from datetime import datetime, timedelta, timezone as dt_tz  # noqa: E402
 from django.utils import timezone as dj_tz  # noqa: E402
 from . import events as ev_mod  # noqa: E402
+from . import frames as frames_mod  # noqa: E402
 from .models import ProtectEvent  # noqa: E402
 
 
@@ -2071,6 +2072,8 @@ class EventViewTests(TestCase):
         p = patch("cameras.views.is_admin", side_effect=lambda request: self.is_admin)
         p.start()
         self.addCleanup(p.stop)
+        frames_mod.clear()
+        self.addCleanup(frames_mod.clear)
         _ev("p1", ["person"], minutes_ago=10, thumb=b"jpg")
         _ev("m1", ["motion"], minutes_ago=5)
         _ev("d1", ["doorbell"], minutes_ago=1)
@@ -2118,6 +2121,33 @@ class EventViewTests(TestCase):
         self.assertEqual(resp.content, b"img")
         client.get_camera_snapshot.assert_called_once_with(
             "cam1", width=1920, dt=datetime.fromtimestamp(1_700_000_000, tz=dt_tz.utc))
+
+    def test_historical_snapshot_is_resized_and_cached(self):
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (2688, 1512), (40, 90, 160)).save(buf, "JPEG")
+        client = MagicMock()
+        client.get_camera_snapshot.return_value = buf.getvalue()
+        with patch("cameras.views.events.run", side_effect=lambda cam, fn, **kw: fn(client)):
+            c = self._admin()
+            first = c.get("/cameras/snapshot/cam1/?ts=1700000003&w=160")
+            again = c.get("/cameras/snapshot/cam1/?ts=1700000001&w=160")  # same 5 s bucket
+        self.assertEqual(Image.open(io.BytesIO(first.content)).size, (160, 90))
+        self.assertEqual(again.content, first.content)
+        client.get_camera_snapshot.assert_called_once_with(
+            "cam1", width=160, dt=datetime.fromtimestamp(1_700_000_000, tz=dt_tz.utc))
+
+    def test_live_snapshot_is_not_cached(self):
+        client = MagicMock()
+        client.get_camera_snapshot.return_value = b"live"
+        with patch("cameras.views.events.run", side_effect=lambda cam, fn, **kw: fn(client)):
+            c = self._admin()
+            c.get("/cameras/snapshot/cam1/?w=160")
+            resp = c.get("/cameras/snapshot/cam1/?w=160")
+        self.assertEqual(resp.content, b"live")
+        self.assertEqual(resp["Cache-Control"], "no-store")
+        self.assertEqual(client.get_camera_snapshot.call_count, 2)
 
     def test_clip_window_is_capped(self):
         client = MagicMock()
