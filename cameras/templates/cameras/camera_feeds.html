@@ -805,11 +805,20 @@
     const count = rail.querySelector('.ev-count');
 
     // ---- Rail ----
+    // Each site tab gets its own history: only events from cameras on the visible tab.
+    function siteEvents() {
+        const panel = document.querySelector('.site-panel.active');
+        if (!panel) return events;
+        const cams = new Set([...panel.querySelectorAll('.cam-card')].map(c => c.dataset.cameraId));
+        return events.filter(ev => cams.has(ev.camera_id));
+    }
+
     function renderRail() {
-        const shown = events.filter(ev => !filter || ev.kinds.includes(filter));
+        const site = siteEvents();
+        const shown = site.filter(ev => !filter || ev.kinds.includes(filter));
         count.textContent = shown.length ? `${shown.length} event${shown.length === 1 ? '' : 's'}` : '';
         if (!shown.length) {
-            list.innerHTML = `<div class="ev-empty">${events.length ? 'No matching events' : 'No events in the last 24 hours'}</div>`;
+            list.innerHTML = `<div class="ev-empty">${site.length ? 'No matching events' : 'No events in the last 24 hours'}</div>`;
             return;
         }
         const frag = document.createDocumentFragment();
@@ -850,6 +859,11 @@
             renderRail();
         });
     });
+
+    document.querySelectorAll('.site-tab').forEach(tab => tab.addEventListener('click', () => {
+        list.scrollTop = 0;
+        renderRail();
+    }));
 
     async function loadEvents() {
         try {
