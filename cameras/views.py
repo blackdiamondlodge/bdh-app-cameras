@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET, require_POST
 
-from . import config, events
+from . import config, events, frames
 from .models import ProtectEvent
 from .protect_api import get_protect_cameras, ptz_goto_preset
 
@@ -280,6 +280,15 @@ def snapshot(request, camera_id):
         width = min(max(int(request.GET.get('w', 960)), 160), 1920)
     except ValueError:
         width = 960
+    key = None
+    if dt is not None:
+        dt = frames.round_ts(dt)
+        key = (camera_id, int(dt.timestamp()), width)
+        data = frames.get(key)
+        if data is not None:
+            resp = HttpResponse(data, content_type='image/jpeg')
+            resp['Cache-Control'] = 'private, max-age=3600'
+            return resp
     try:
         data = events.run(
             camera_id,
@@ -291,6 +300,9 @@ def snapshot(request, camera_id):
         return _unavailable(err)
     if not data:
         raise Http404
+    if key is not None:
+        data = frames.resize(data, width)
+        frames.put(key, data)
     resp = HttpResponse(data, content_type='image/jpeg')
     resp['Cache-Control'] = 'private, max-age=3600' if dt else 'no-store'
     return resp
