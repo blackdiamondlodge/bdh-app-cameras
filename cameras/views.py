@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone as dt_timezone
 from functools import wraps
 
+from bdh_sdk import is_admin
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -187,21 +188,16 @@ def camera_feed_view(request):
         'sites': sites,
         'go2rtc_url': go2rtc_url,
         'go2rtc_port': go2rtc_port,
-        'is_admin': _is_admin(request),
+        'is_admin': is_admin(request),
         'event_kinds': config.enabled_event_kinds(),
     })
-
-
-def _is_admin(request):
-    user = getattr(request, 'user', None)
-    return bool(user and user.is_authenticated and user.is_staff)
 
 
 def admin_only(view):
     """Recordings and history are for signed-in staff only; guests get live view."""
     @wraps(view)
     def wrapped(request, *args, **kwargs):
-        if not _is_admin(request):
+        if not is_admin(request):
             return JsonResponse({'error': 'forbidden'}, status=403)
         return view(request, *args, **kwargs)
     return wrapped
