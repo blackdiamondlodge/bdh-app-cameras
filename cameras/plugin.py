@@ -28,6 +28,9 @@ spec = PluginSpec(
                 help="Motion with no person, vehicle, package or animal detected."),
         Setting("doorbell_popup", "Doorbell pop-up", type=BOOL, default=True,
                 help="Show the doorbell camera live on the hub screen when someone rings."),
+        Setting("event_popup", "Event pop-ups", type=BOOL, default=True,
+                help="Show a camera live when one of the site's event_popups fires, "
+                     "e.g. the front door opening."),
         Setting("popup_seconds", "Pop-up duration", type=INT, default=60,
                 minimum=10, maximum=600, unit="s"),
     ),
