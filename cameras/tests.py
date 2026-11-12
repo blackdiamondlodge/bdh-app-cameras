@@ -517,6 +517,10 @@ class CameraFeedViewWithProtectTests(TestCase):
         # Uses the correct video-stream custom element (not video-rtc)
         self.assertIn("<video-stream", content)
         self.assertNotIn("<video-rtc", content)
+
+        with patch("cameras.config.keep_open", return_value=False):
+            response = self.client.get("/cameras/")
+        self.assertNotContains(response, 'name="bdh-screensaver"')
         # Stream names stored as data attributes for dynamic URL construction
         self.assertIn('data-stream-name="front_door"', content)
         self.assertIn('data-stream-name="backyard"', content)

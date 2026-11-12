@@ -46,6 +46,11 @@ event (e.g. a webhook) always pops up. The pop-up shares the doorbell's alert, s
 event while it is showing just restarts its timer (`popup_seconds`). Turn it off with the
 "Event pop-ups" setting. Changes to `event_popups` need a hub restart.
 
+## Screen saver
+
+While the cameras page is open the hub screen saver stays off, so the cameras stay on screen.
+Turn this off with the "Leave cameras open when idle" setting (`keep_open`).
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) uses the reusable `app-ci.yml` from

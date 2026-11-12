@@ -2,7 +2,7 @@
 
 {% block title %}Cameras{% endblock %}
 
-{% block extra_head %}<meta name="bdh-screensaver" content="off">{% endblock %}
+{% block extra_head %}{% if keep_open %}<meta name="bdh-screensaver" content="off">{% endif %}{% endblock %}
 
 {% block content %}
 <style>

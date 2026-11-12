@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bdh-app-cameras"
-version = "1.4.2"
+version = "1.4.3"
 description = "Black Diamond Hub app: live camera feeds via go2rtc and UniFi Protect"
 readme = "README.md"
 license = { text = "MIT" }

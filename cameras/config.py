@@ -63,6 +63,11 @@ def event_popup():
     return app_setting("cameras", "event_popup", True, cast=as_bool)
 
 
+def keep_open():
+    """Hold off the hub screensaver while the cameras page is open."""
+    return app_setting("cameras", "keep_open", True, cast=as_bool)
+
+
 def popup_seconds():
     try:
         return max(10, int(app_setting("cameras", "popup_seconds", 60)))
