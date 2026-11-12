@@ -393,7 +393,10 @@
         position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; z-index: 1;
         pointer-events: none;
     }
-    .cam-card.scrubbing .cam-replay { visibility: hidden; }
+    .cam-card.scrubbing .cam-replay, .cam-replay.standby { visibility: hidden; }
+    /* Presets only make sense while watching live. */
+    .cam-card:fullscreen.replaying .ptz-controls,
+    .cam-card:fullscreen.scrubbing .ptz-controls { display: none; }
     /* Hold the preview frame over the replay video until it starts playing. */
     .cam-card:fullscreen.replaying.loading .cam-still[src] { display: block; z-index: 2; }
     .cam-still.low { filter: blur(3px); }
@@ -504,7 +507,8 @@
         </div>
         {% if is_admin and stream.camera_id %}
         <img class="cam-still" alt="">
-        <video class="cam-replay" playsinline muted></video>
+        <video class="cam-replay" playsinline muted preload="auto"></video>
+        <video class="cam-replay standby" playsinline muted preload="auto"></video>
         <div class="cam-replay-tag">REPLAY</div>
         <div class="cam-scrub">
             <div class="scrub-row">
@@ -1009,7 +1013,9 @@
             this.playBtn = this.bar.querySelector('[data-act="play"]');
             this.liveBtn = this.bar.querySelector('[data-act="live"]');
             this.liveBehind = this.liveBtn.querySelector('.live-behind');
-            this.video = card.querySelector('.cam-replay');
+            // Two replay players: one plays, the other preloads the next chunk.
+            [this.video, this.spare] = card.querySelectorAll('.cam-replay');
+            this.spareStart = null;
             this.still = card.querySelector('.cam-still');
             this.zoomH = 6;
             this.mode = 'live';
@@ -1054,23 +1060,63 @@
             this.track.addEventListener('pointerup', end);
             this.track.addEventListener('pointercancel', end);
 
-            this.video.addEventListener('timeupdate', () => {
-                if (this.mode !== 'replay' || this.dragging) return;
-                this.t = this.clipStart + this.video.currentTime * 1000;
-                this.render();
-            });
-            this.video.addEventListener('playing', () => { this.card.classList.remove('loading'); this.setPlayIcon(true); });
-            this.video.addEventListener('pause', () => this.setPlayIcon(false));
-            this.video.addEventListener('ended', () => {
-                if (this.mode !== 'replay') return;
-                const next = this.clipStart + CHUNK_S * 1000;
-                if (next >= Date.now() - 5000) this.goLive(); else this.replay(next);
-            });
-            this.video.addEventListener('error', () => {
-                if (this.mode !== 'replay' || !this.video.getAttribute('src')) return;
-                this.card.classList.remove('loading');
-                this.timeEl.textContent = 'Clip unavailable';
-            });
+            for (const v of [this.video, this.spare]) {
+                const active = () => v === this.video && this.mode === 'replay';
+                v.addEventListener('timeupdate', () => {
+                    if (!active() || this.dragging) return;
+                    this.t = this.clipStart + v.currentTime * 1000;
+                    this.render();
+                });
+                v.addEventListener('playing', () => {
+                    if (!active()) return;
+                    this.card.classList.remove('loading');
+                    this.setPlayIcon(true);
+                    this.preloadNext();
+                });
+                v.addEventListener('pause', () => { if (active()) this.setPlayIcon(false); });
+                v.addEventListener('ended', () => {
+                    if (!active()) return;
+                    const next = this.clipStart + CHUNK_S * 1000;
+                    if (next >= Date.now() - 5000) this.goLive();
+                    else if (this.spareStart === next) this.swapToSpare();
+                    else this.replay(next);
+                });
+                v.addEventListener('error', () => {
+                    if (v !== this.video) { this.spareStart = null; return; }
+                    if (this.mode !== 'replay' || !v.getAttribute('src')) return;
+                    this.card.classList.remove('loading');
+                    this.timeEl.textContent = 'Clip unavailable';
+                });
+            }
+        }
+
+        // Fetch the following chunk into the hidden player while this one plays.
+        preloadNext() {
+            const next = this.clipStart + CHUNK_S * 1000;
+            if (this.spareStart === next || next >= Date.now() - 5000) return;
+            const s = Math.floor(next / 1000);
+            this.spareStart = next;
+            this.spare.src = CLIP_URL(this.cam, s, Math.min(s + CHUNK_S, Math.floor(Date.now() / 1000)));
+            this.spare.load();
+        }
+        swapToSpare() {
+            const old = this.video;
+            [this.video, this.spare] = [this.spare, old];
+            this.clipStart = this.spareStart;
+            this.spareStart = null;
+            this.video.classList.remove('standby');
+            old.classList.add('standby');
+            old.pause();
+            if (this.video.readyState < 3) this.card.classList.add('loading');
+            this.video.currentTime = 0;
+            this.video.play().catch(() => {});
+            this.clearSpare();
+        }
+        clearSpare() {
+            this.spareStart = null;
+            this.spare.pause();
+            this.spare.removeAttribute('src');
+            this.spare.load();
         }
 
         windowRange() {
@@ -1262,6 +1308,7 @@
             this.card.classList.add('replaying', 'loading');
             this.card.classList.remove('scrubbing');
             this.timeEl.textContent = fmtFull(t);
+            this.clearSpare();
             this.video.src = CLIP_URL(this.cam, s, e);
             this.video.play().catch(() => {});
             this.render();
@@ -1272,6 +1319,7 @@
             this.video.pause();
             this.video.removeAttribute('src');
             this.video.load();
+            this.clearSpare();
             this.still.removeAttribute('src');
             this.snapNext = null;
             this.card.classList.remove('replaying', 'scrubbing', 'loading');
