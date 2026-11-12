@@ -33,14 +33,14 @@ it on. Choose which ones show up in the app's Settings.
 
 ## Pop-ups
 
-Admins choose what pops up each camera on **Settings → Pop-ups** (`/cameras/settings/popups/`):
+Admins choose what pops up each camera on **Settings â†’ Pop-ups** (`/cameras/settings/popups/`):
 
 - **Detections:** Ring (doorbells only), Person, Vehicle, Package or Animal. A detection pops up
   once per Protect event, and only within 30 seconds of the event starting.
 - **Also pop up when:** any Home Assistant entity. Pick a device (grouped by room, rooms named like
-  the camera first), then one of its entities, then what it does ("opens", "turns on", "unlocks"�),
+  the camera first), then one of its entities, then what it does ("opens", "turns on", "unlocks"…),
   or search devices and entities by name, room or ID. Devices with no trigger-like entities
-  (binary sensors, locks, covers, switches, `event.*`�) and diagnostic/config entities are hidden
+  (binary sensors, locks, covers, switches, `event.*`…) and diagnostic/config entities are hidden
   until you ask for them. By default a binary sensor fires on `on`, a lock on `unlocked` and an
   `event.*` entity on each new event; other entities fire on any state change, or on the state
   you choose. Tap a trigger to change or remove it.
