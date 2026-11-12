@@ -6,7 +6,8 @@ class BdlCamerasConfig(AppConfig):
     name = 'cameras'
 
     def ready(self):
-        from . import events
+        from . import events, popups
 
         if events.should_start():
             events.start()
+            popups.start()

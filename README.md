@@ -30,6 +30,22 @@ it on. Choose which ones show up in the app's Settings.
 - On a doorbell ring the app pushes a hub alert that embeds `/cameras/popup/<camera_id>/`,
   a live-only page. You can turn the pop-up off and set how long it stays open in Settings.
 
+## Event pop-ups
+
+The app can also pop up a camera when a hub event fires (`bdh_sdk.events`), for example a door
+opening in Home Assistant. Map event topics to Protect camera names (case-insensitive) in the
+site's `site.toml`:
+
+```toml
+[apps.cameras]
+event_popups = { "ha/state/binary_sensor.front_door" = "Front Door" }
+```
+
+or as JSON in `BDH_CAMERAS_EVENT_POPUPS`. A state change pops up only on `off` → `on`; any other
+event (e.g. a webhook) always pops up. The pop-up shares the doorbell's alert, so a ring or another
+event while it is showing just restarts its timer (`popup_seconds`). Turn it off with the
+"Event pop-ups" setting. Changes to `event_popups` need a hub restart.
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) uses the reusable `app-ci.yml` from
