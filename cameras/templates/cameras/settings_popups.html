@@ -25,7 +25,7 @@
     #cp-status.bad { color: var(--red); }
     /* --hub-kb-h is the on-screen keyboard's height while it's open (set by the hub's keyboard.js),
        so the dialog shrinks to the space above it instead of being covered. */
-    .cp-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 6vh 16px calc(16px + var(--hub-kb-h, 0px)); box-sizing: border-box; }
+    .cp-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: flex-start; justify-content: center; z-index: 1055; padding: 6vh 16px calc(16px + var(--hub-kb-h, 0px)); box-sizing: border-box; }
     html[style*="--hub-kb-h"] .cp-modal { padding-top: 12px; }
     .cp-modal.open { display: flex; }
     .cp-box { background: var(--card); border: 1px solid var(--line); border-radius: 22px; width: min(620px, 100%); max-height: min(82vh, 100%); display: flex; flex-direction: column; overflow: hidden; }
