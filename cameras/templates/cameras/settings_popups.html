@@ -10,33 +10,42 @@
     .cp-chips { display: flex; gap: 8px; flex-wrap: wrap; }
     .cp-chip { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--mut); border-radius: 999px; padding: 7px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
     .cp-chip.on { border-color: var(--acc); background: rgba(91,164,230,.16); color: #eef3fa; }
-    .cp-chip:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+    .cp-chip:focus-visible, .cp-trig:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
     .cp-also { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .cp-also > small { color: var(--mut); font-size: 13.5px; margin-right: 4px; }
-    .cp-trig { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 14px; font-size: 14px; background: rgba(255,255,255,.04); }
-    .cp-trig em { font-style: normal; color: var(--mut); }
-    .cp-trig button { border: 0; background: transparent; color: var(--mut); cursor: pointer; font-size: 15px; width: 26px; height: 26px; border-radius: 50%; }
-    .cp-trig button:hover { color: var(--red); background: rgba(255,154,154,.12); }
+    .cp-trig { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 7px 12px 7px 14px; font-size: 14px; background: rgba(255,255,255,.04); color: inherit; font-family: inherit; text-align: left; cursor: pointer; max-width: 100%; }
+    .cp-trig:hover { border-color: var(--acc); }
+    .cp-trig span { min-width: 0; }
+    .cp-trig em { font-style: normal; color: var(--acc2); }
+    .cp-trig small { display: block; color: var(--mut); font-size: 12.5px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cp-trig i { font-style: normal; color: var(--mut); font-size: 13px; flex: none; }
     .cp-add { border: 1px dashed var(--line); background: transparent; color: var(--acc2); border-radius: 999px; padding: 6px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
     .cp-off .cp-cam { opacity: .45; }
     #cp-status { min-width: 80px; text-align: right; color: var(--mut); font-size: 14px; }
     #cp-status.bad { color: var(--red); }
-    .cp-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 6vh 16px 16px; }
+    /* --hub-kb-h is the on-screen keyboard's height while it's open (set by the hub's keyboard.js),
+       so the dialog shrinks to the space above it instead of being covered. */
+    .cp-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 6vh 16px calc(16px + var(--hub-kb-h, 0px)); box-sizing: border-box; }
+    html[style*="--hub-kb-h"] .cp-modal { padding-top: 12px; }
     .cp-modal.open { display: flex; }
-    .cp-box { background: var(--card); border: 1px solid var(--line); border-radius: 22px; width: min(620px, 100%); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+    .cp-box { background: var(--card); border: 1px solid var(--line); border-radius: 22px; width: min(620px, 100%); max-height: min(82vh, 100%); display: flex; flex-direction: column; overflow: hidden; }
     .cp-box header { padding: 18px 22px 12px; }
     .cp-box header b { font-size: 17px; font-weight: 500; }
     .cp-box header input { width: 100%; margin-top: 12px; box-sizing: border-box; }
-    .cp-list { overflow-y: auto; padding: 0 10px 10px; flex: 1; }
+    .cp-crumb { border: 0; background: transparent; color: var(--acc2); font-family: inherit; font-size: 14px; padding: 10px 0 0; cursor: pointer; }
+    .cp-list { overflow-y: auto; padding: 0 10px 10px; flex: 1; min-height: 0; }
     .cp-list h4 { margin: 10px 12px 6px; color: var(--mut); font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
     .cp-ent { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; padding: 10px 12px; border-radius: 12px; cursor: pointer; font-family: inherit; font-size: 15px; }
     .cp-ent:hover, .cp-ent.sel { background: rgba(91,164,230,.14); }
     .cp-ent span { flex: 1; min-width: 0; }
     .cp-ent small { display: block; color: var(--mut); font-size: 12.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cp-ent i { font-style: normal; color: var(--mut); font-size: 13px; flex: none; }
+    .cp-more { border: 0; background: transparent; color: var(--acc2); font-family: inherit; font-size: 14px; padding: 10px 12px; cursor: pointer; }
     .cp-foot { border-top: 1px solid var(--line); padding: 14px 22px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .cp-foot .what { flex: 1; min-width: 180px; font-size: 14.5px; }
     .cp-foot .what small { display: block; color: var(--mut); }
+    .cp-foot .when { display: flex; align-items: center; gap: 8px; color: var(--mut); font-size: 14px; }
+    .cp-foot .cp-del { color: var(--red); }
     .cp-msg { color: var(--mut); padding: 14px 12px; font-size: 14px; }
 </style>
 
@@ -62,12 +71,14 @@
     <div class="cp-box">
         <header>
             <b id="cp-modal-title">Pop up</b>
-            <input class="hst-in txt" id="cp-search" type="search" placeholder="Search entities, rooms or IDs" autocomplete="off">
+            <input class="hst-in txt" id="cp-search" type="search" placeholder="Search devices, entities or rooms" autocomplete="off">
+            <button class="cp-crumb" type="button" id="cp-crumb" hidden>‹ All devices</button>
         </header>
         <div class="cp-list" id="cp-list"></div>
         <div class="cp-foot">
-            <div class="what" id="cp-what"><small>Pick an entity</small></div>
-            <span id="cp-to-wrap"></span>
+            <div class="what" id="cp-what"><small>Pick a device, then what it does</small></div>
+            <span class="when" id="cp-to-wrap"></span>
+            <button class="hst-btn ghost cp-del" type="button" id="cp-del" hidden>Remove</button>
             <button class="hst-btn ghost" type="button" id="cp-cancel">Cancel</button>
             <button class="hst-btn" type="button" id="cp-ok" disabled>Add</button>
         </div>
@@ -81,7 +92,7 @@
     const cfg = page.config;
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
     const KIND_LABEL = {doorbell: 'Ring', person: 'Person', vehicle: 'Vehicle', package: 'Package', animal: 'Animal'};
-    // States offered for "becomes"; other domains get a text box.
+    // States offered in the "when it" list; other domains get a text box.
     const STATES = {
         binary_sensor: ['on', 'off'], lock: ['unlocked', 'locked', 'open', 'jammed'],
         cover: ['open', 'closed', 'opening'], person: ['home', 'not_home'], device_tracker: ['home', 'not_home'],
@@ -90,7 +101,16 @@
     };
     const DEFAULT_TO = {binary_sensor: 'on', lock: 'unlocked'};
     const OPENINGS = ['door', 'garage_door', 'opening', 'window'];
-    let entities = null, byId = {};
+    const DETECTS = {motion: 'motion', occupancy: 'occupancy', presence: 'presence'};
+    const ON_OFF = ['binary_sensor', 'switch', 'input_boolean', 'light', 'fan'];
+    const VERBS = {
+        lock: {unlocked: 'unlocks', locked: 'locks', open: 'opens', jammed: 'jams'},
+        cover: {open: 'opens', closed: 'closes', opening: 'starts opening'},
+        person: {home: 'arrives home', not_home: 'leaves home'},
+        device_tracker: {home: 'arrives home', not_home: 'leaves home'},
+        alarm_control_panel: {triggered: 'is triggered', armed_away: 'arms away', armed_home: 'arms home', disarmed: 'disarms'},
+    };
+    let entities = null, devices = [], byId = {}, devById = {}, entsByDev = {};
 
     const el = (tag, props, ...kids) => {
         const n = Object.assign(document.createElement(tag), props || {});
@@ -99,20 +119,28 @@
     };
     const camCfg = id => cfg.cameras[id] || (cfg.cameras[id] = {kinds: [], triggers: []});
     const domainOf = id => id.split('.')[0];
+    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 
-    function stateWord(entityId, to) {
+    // What the entity does to fire the pop-up, e.g. "opens", "turns on", "unlocks".
+    function verb(entityId, to) {
         const e = byId[entityId], d = domainOf(entityId);
+        if (d === 'event') return 'fires';
         const v = to || DEFAULT_TO[d];
-        if (!v) return d === 'event' ? '' : 'changes';
-        if (d === 'binary_sensor' && e && OPENINGS.includes(e.device_class)) return v === 'on' ? 'opens' : 'closes';
-        if (d === 'binary_sensor' && v === 'on') return 'detects';
-        if (d === 'binary_sensor' && v === 'off') return 'clears';
-        return v.replace(/_/g, ' ');
+        if (!v) return 'changes';
+        if (d === 'binary_sensor' && e && (v === 'on' || v === 'off')) {
+            if (OPENINGS.includes(e.device_class)) return v === 'on' ? 'opens' : 'closes';
+            if (DETECTS[e.device_class]) return v === 'on' ? 'detects ' + DETECTS[e.device_class] : 'clears';
+        }
+        if (ON_OFF.includes(d) && (v === 'on' || v === 'off')) return 'turns ' + v;
+        if (VERBS[d] && VERBS[d][v]) return VERBS[d][v];
+        return 'becomes ' + v.replace(/_/g, ' ');
     }
-    function trigLabel(t) {
-        const e = byId[t.entity_id];
-        return [e ? e.name : t.entity_id, stateWord(t.entity_id, t.to)];
+    // "Device · Room" under an entity's name.
+    function where(e) {
+        const d = e.device && devById[e.device];
+        return [d && d.name !== e.name ? d.name : '', e.area || (d && d.area)].filter(Boolean).join(' · ');
     }
+    const stub = id => ({id, name: id, short: id, area: '', state: '', domain: domainOf(id), device_class: '', device: '', useful: true});
 
     // ---- saving ----
     const status = document.getElementById('cp-status');
@@ -156,15 +184,18 @@
             el('div', {className: 'lbl'}, el('b', {textContent: cam.name}),
                el('small', {textContent: cam.doorbell ? 'Doorbell · pops up when it detects' : 'Pops up when it detects'})),
             chips));
-        const also = el('div', {className: 'cp-also'}, el('small', {textContent: 'Also when'}));
+        const also = el('div', {className: 'cp-also'}, el('small', {textContent: 'Also pop up when'}));
         c.triggers.forEach((t, i) => {
-            const [name, word] = trigLabel(t);
-            const x = el('button', {type: 'button', textContent: '✕', title: 'Remove', ariaLabel: 'Remove ' + name});
-            x.addEventListener('click', () => { c.triggers.splice(i, 1); render(); save(); });
-            also.append(el('span', {className: 'cp-trig', title: t.entity_id}, name, word ? el('em', {textContent: word}) : null, x));
+            const e = byId[t.entity_id] || stub(t.entity_id), v = verb(t.entity_id, t.to);
+            const b = el('button', {type: 'button', className: 'cp-trig', title: t.entity_id, ariaLabel: 'Edit: ' + e.name + ' ' + v},
+                el('span', {}, el('b', {textContent: e.name}), ' ', el('em', {textContent: v}),
+                   el('small', {textContent: where(e) || t.entity_id})),
+                el('i', {textContent: '✎', ariaHidden: 'true'}));
+            b.addEventListener('click', () => openPicker(cam, i));
+            also.append(b);
         });
         const add = el('button', {type: 'button', className: 'cp-add', textContent: '+ Add'});
-        add.addEventListener('click', () => openPicker(cam));
+        add.addEventListener('click', () => openPicker(cam, null));
         also.append(add);
         row.append(also);
         return row;
@@ -184,103 +215,188 @@
         });
     }
 
-    // ---- entity picker ----
+    // ---- trigger picker: rooms -> device -> entity -> "when it" ----
     const modal = document.getElementById('cp-modal'), search = document.getElementById('cp-search');
     const list = document.getElementById('cp-list'), what = document.getElementById('cp-what');
     const toWrap = document.getElementById('cp-to-wrap'), ok = document.getElementById('cp-ok');
-    let pickCam = null, picked = null, toInput = null;
+    const del = document.getElementById('cp-del'), crumb = document.getElementById('cp-crumb');
+    // dev: null = the device list, '' = entities without a device, else a device id.
+    let pickCam = null, editIdx = null, picked = null, toInput = null, dev = null, showAll = false, showMore = false;
 
     function loadEntities() {
         if (entities) return Promise.resolve(entities);
         return fetch(page.entities_url, {credentials: 'same-origin'})
             .then(r => r.ok ? r.json() : Promise.reject(r.status))
-            .then(d => { entities = d.entities; byId = {}; entities.forEach(e => byId[e.id] = e); return entities; });
+            .then(d => {
+                entities = d.entities; devices = d.devices || [];
+                byId = {}; devById = {}; entsByDev = {};
+                entities.forEach(e => { byId[e.id] = e; (entsByDev[e.device] = entsByDev[e.device] || []).push(e); });
+                devices.forEach(x => devById[x.id] = x);
+                return entities;
+            });
     }
-    function score(e, words) {
-        const name = e.name.toLowerCase(), area = e.area.toLowerCase(), id = e.id.toLowerCase();
+    const usefulOf = id => (entsByDev[id] || []).filter(e => e.useful);
+    const words = () => search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    function score(fields, ids, ws, bonus) {
         let s = 0;
-        for (const w of words) {
-            if (name.startsWith(w) || area.startsWith(w)) s += 3;
-            else if (name.includes(w) || area.includes(w)) s += 2;
-            else if (id.includes(w)) s += 1;
+        for (const w of ws) {
+            if (fields.some(f => f.startsWith(w))) s += 3;
+            else if (fields.some(f => f.includes(w))) s += 2;
+            else if (ids.some(f => f.includes(w))) s += 1;
             else return 0;
         }
-        return s + (e.suggest ? 0.5 : 0);
+        return s + bonus;
     }
-    function entRow(e) {
-        const b = el('button', {type: 'button', className: 'cp-ent' + (picked === e ? ' sel' : '')},
-            el('span', {}, e.name, el('small', {textContent: [e.area, e.id].filter(Boolean).join(' · ')})),
-            el('i', {textContent: e.state}));
-        b.addEventListener('click', () => pick(e));
+    const scoreEnt = (e, ws) => score([e.name.toLowerCase(), e.area.toLowerCase()], [e.id], ws, e.useful ? 0.5 : 0);
+    const scoreDev = (d, ws) => score([d.name.toLowerCase(), d.area.toLowerCase()], [d.maker.toLowerCase()], ws, 0);
+
+    const h4 = text => el('h4', {textContent: text});
+    function more(text, fn) {
+        const b = el('button', {type: 'button', className: 'cp-more', textContent: text});
+        b.addEventListener('click', fn);
         return b;
+    }
+    function devRow(d, n) {
+        const b = el('button', {type: 'button', className: 'cp-ent'},
+            el('span', {}, d.name, el('small', {textContent: [d.maker, plural(n, 'entity', 'entities')].filter(Boolean).join(' · ')})),
+            el('i', {textContent: '›'}));
+        b.addEventListener('click', () => { dev = d.id; showMore = false; search.value = ''; showList(); list.scrollTop = 0; });
+        return b;
+    }
+    function entRow(e, full) {
+        const sub = full ? [where(e), e.id] : [e.area && e.device && devById[e.device] && e.area !== devById[e.device].area ? e.area : '', e.id];
+        const b = el('button', {type: 'button', className: 'cp-ent' + (picked && picked.id === e.id ? ' sel' : '')},
+            el('span', {}, full ? e.name : e.short, el('small', {textContent: sub.filter(Boolean).join(' · ')})),
+            el('i', {textContent: e.state}));
+        b.addEventListener('click', () => pick(e, ''));
+        return b;
+    }
+    function showDevices() {
+        const camWords = pickCam.name.toLowerCase().split(/\s+/).filter(w => w.length > 2 && w !== 'camera');
+        const near = room => camWords.some(w => room.toLowerCase().includes(w)) ? 1 : 0;
+        const rooms = {};
+        let hidden = 0;
+        devices.forEach(d => {
+            const n = usefulOf(d.id).length;
+            if (!n && !showAll) { hidden++; return; }
+            (rooms[d.area] = rooms[d.area] || []).push([d, n || (entsByDev[d.id] || []).length]);
+        });
+        // Rooms named like the camera first, then A-Z; devices without a room last.
+        Object.keys(rooms).sort((a, b) => (!a) - (!b) || near(b) - near(a) || a.localeCompare(b)).forEach(r => {
+            list.append(h4(r || 'No room'));
+            rooms[r].forEach(([d, n]) => list.append(devRow(d, n)));
+        });
+        const loose = entsByDev[''] || [], nl = loose.filter(e => e.useful).length;
+        if (nl || (showAll && loose.length)) {
+            list.append(h4('No device'));
+            list.append(devRow({id: '', name: 'Helpers & templates', maker: ''}, nl || loose.length));
+        }
+        if (hidden) list.append(more('Show all devices (' + hidden + ' more)', () => { showAll = true; showList(); }));
+        else if (!list.childElementCount) list.append(el('div', {className: 'cp-msg', textContent: 'No devices found.'}));
+    }
+    function showDevice(id) {
+        const d = devById[id];
+        list.append(h4(d ? [d.name, d.area].filter(Boolean).join(' · ') : 'Helpers & templates'));
+        const byShort = (a, b) => a.short.localeCompare(b.short) || a.id.localeCompare(b.id);
+        const all = (entsByDev[id] || []).slice().sort(byShort);
+        const main = all.filter(e => e.useful), rest = all.filter(e => !e.useful);
+        main.forEach(e => list.append(entRow(e, false)));
+        if (showMore || !main.length || (picked && rest.some(e => e.id === picked.id))) rest.forEach(e => list.append(entRow(e, false)));
+        else if (rest.length) list.append(more('Show ' + rest.length + ' more (sensors, settings…)', () => { showMore = true; showList(); }));
+        if (!all.length) list.append(el('div', {className: 'cp-msg', textContent: 'No entities.'}));
+    }
+    function showSearch(ws) {
+        const top = (items, fn, n) => items.map(x => [fn(x, ws), x]).filter(x => x[0] > 0)
+            .sort((a, b) => b[0] - a[0]).slice(0, n).map(x => x[1]);
+        const devHits = top(devices, scoreDev, 8), entHits = top(entities, scoreEnt, 40);
+        if (devHits.length) {
+            list.append(h4('Devices'));
+            devHits.forEach(d => list.append(devRow(d, usefulOf(d.id).length || (entsByDev[d.id] || []).length)));
+        }
+        if (entHits.length) {
+            list.append(h4('Entities'));
+            entHits.forEach(e => list.append(entRow(e, true)));
+        }
+        if (!devHits.length && !entHits.length) list.append(el('div', {className: 'cp-msg', textContent: 'Nothing matches.'}));
     }
     function showList() {
         list.replaceChildren();
+        const ws = words();
+        crumb.hidden = dev === null || ws.length > 0;
         if (!entities) return;
-        const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
-        if (!words.length) {
-            // Suggestions: likely triggers, ones in the camera's area first.
-            const camWords = pickCam.name.toLowerCase().split(/\s+/).filter(w => w.length > 2 && w !== 'camera');
-            const near = e => camWords.some(w => (e.area + ' ' + e.name).toLowerCase().includes(w)) ? 1 : 0;
-            const sugg = entities.filter(e => e.suggest).sort((a, b) => near(b) - near(a)).slice(0, 10);
-            list.append(el('h4', {textContent: 'Suggested'}));
-            sugg.forEach(e => list.append(entRow(e)));
-            list.append(el('div', {className: 'cp-msg', textContent: 'Search to find any of ' + entities.length + ' entities.'}));
-            return;
-        }
-        const hits = entities.map(e => [score(e, words), e]).filter(x => x[0] > 0)
-            .sort((a, b) => b[0] - a[0]).slice(0, 50).map(x => x[1]);
-        if (!hits.length) list.append(el('div', {className: 'cp-msg', textContent: 'Nothing matches.'}));
-        hits.forEach(e => list.append(entRow(e)));
+        if (ws.length) showSearch(ws);
+        else if (dev === null) showDevices();
+        else showDevice(dev);
     }
-    function pick(e) {
+    function pick(e, to) {
         picked = e;
-        what.replaceChildren(el('b', {textContent: e.name}), el('small', {textContent: 'Pops up ' + pickCam.name + ' when it'}));
+        dev = e.device || '';
+        what.replaceChildren(el('b', {textContent: e.name}), el('small', {textContent: where(e) || e.id}));
         toWrap.replaceChildren();
         toInput = null;
-        if (e.domain !== 'event') {
-            const opts = STATES[e.domain];
-            const dflt = DEFAULT_TO[e.domain];
-            if (opts) {
-                toInput = el('select', {className: 'hst-in', ariaLabel: 'Becomes'});
-                if (!dflt) toInput.append(el('option', {value: '', textContent: 'changes'}));
-                opts.forEach(v => toInput.append(el('option', {value: v === dflt ? '' : v,
-                    textContent: 'becomes ' + stateWord(e.id, v)})));
-            } else {
-                toInput = el('input', {className: 'hst-in', placeholder: 'any change', maxLength: 64, ariaLabel: 'Becomes (optional)', style: 'width:150px'});
-            }
-            toWrap.append(toInput);
+        if (e.domain === 'event') {
+            toWrap.append('when it fires');
         } else {
-            what.querySelector('small').textContent = 'Pops up ' + pickCam.name + ' on every event';
+            const opts = STATES[e.domain], dflt = DEFAULT_TO[e.domain];
+            if (opts) {
+                toInput = el('select', {className: 'hst-in', ariaLabel: 'When it'});
+                if (!dflt) toInput.append(el('option', {value: '', textContent: 'changes'}));
+                opts.forEach(v => toInput.append(el('option', {value: v === dflt ? '' : v, textContent: verb(e.id, v)})));
+                if (to && !opts.includes(to)) toInput.append(el('option', {value: to, textContent: verb(e.id, to)}));
+                toInput.value = to === dflt ? '' : (to || '');
+            } else {
+                toInput = el('input', {className: 'hst-in', placeholder: 'changes to anything', maxLength: 64, ariaLabel: 'When it becomes (optional)', style: 'width:170px', value: to || ''});
+            }
+            toWrap.append(opts ? 'when it' : 'when it becomes', toInput);
         }
         ok.disabled = false;
+        if (search.value) search.value = '';
         showList();
     }
-    function openPicker(cam) {
-        pickCam = cam; picked = null; toInput = null; ok.disabled = true;
+    function openPicker(cam, idx) {
+        pickCam = cam; editIdx = idx; picked = null; toInput = null; dev = null; showAll = false; showMore = false;
         document.getElementById('cp-modal-title').textContent = 'Pop up ' + cam.name + ' when…';
-        what.replaceChildren(el('small', {textContent: 'Pick an entity'}));
+        what.replaceChildren(el('small', {textContent: 'Pick a device, then what it does'}));
         toWrap.replaceChildren();
+        ok.disabled = true;
+        ok.textContent = idx === null ? 'Add' : 'Save';
+        del.hidden = idx === null;
         search.value = '';
+        crumb.hidden = true;
         modal.classList.add('open');
-        search.focus();
-        list.replaceChildren(el('div', {className: 'cp-msg', textContent: 'Loading Home Assistant entities…'}));
-        loadEntities().then(showList, () => {
-            list.replaceChildren(el('div', {className: 'cp-msg', textContent: 'Home Assistant is unavailable. Try again shortly.'}));
+        list.replaceChildren(el('div', {className: 'cp-msg', textContent: 'Loading Home Assistant devices…'}));
+        const t = idx === null ? null : camCfg(cam.id).triggers[idx];
+        loadEntities().then(() => {
+            if (pickCam !== cam) return;
+            if (t) pick(byId[t.entity_id] || stub(t.entity_id), t.to || '');
+            else showList();
+        }, () => {
             entities = null;
+            if (pickCam !== cam) return;
+            if (t) pick(stub(t.entity_id), t.to || '');
+            list.replaceChildren(el('div', {className: 'cp-msg', textContent: 'Home Assistant is unavailable. Try again shortly.'}));
         });
     }
     function closePicker() { modal.classList.remove('open'); pickCam = null; }
     search.addEventListener('input', showList);
+    crumb.addEventListener('click', () => { dev = null; showMore = false; showList(); list.scrollTop = 0; });
     document.getElementById('cp-cancel').addEventListener('click', closePicker);
     modal.addEventListener('click', ev => { if (ev.target === modal) closePicker(); });
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && modal.classList.contains('open')) closePicker(); });
+    del.addEventListener('click', () => {
+        if (!pickCam || editIdx === null) return;
+        camCfg(pickCam.id).triggers.splice(editIdx, 1);
+        closePicker(); render(); save();
+    });
     ok.addEventListener('click', () => {
         if (!picked || !pickCam) return;
         const to = toInput ? toInput.value.trim() : '';
         const t = to ? {entity_id: picked.id, to} : {entity_id: picked.id};
-        const c = camCfg(pickCam.id);
-        if (!c.triggers.some(x => x.entity_id === t.entity_id && (x.to || '') === to)) c.triggers.push(t);
+        const trigs = camCfg(pickCam.id).triggers;
+        const dup = trigs.some((x, i) => i !== editIdx && x.entity_id === t.entity_id && (x.to || '') === to);
+        if (editIdx === null) { if (!dup) trigs.push(t); }
+        else if (dup) trigs.splice(editIdx, 1);
+        else trigs[editIdx] = t;
         closePicker(); render(); save();
     });
 

@@ -2390,23 +2390,39 @@ class PopupSettingsViewTests(TestCase):
         states = [
             {"entity_id": "binary_sensor.front_door", "state": "off",
              "attributes": {"friendly_name": "Front Door", "device_class": "door"}},
+            {"entity_id": "binary_sensor.front_door_motion", "state": "off",
+             "attributes": {"friendly_name": "Front Door Motion", "device_class": "motion"}},
+            {"entity_id": "sensor.front_door_battery", "state": "90",
+             "attributes": {"friendly_name": "Front Door Battery"}},
             {"entity_id": "sensor.temp", "state": "20", "attributes": {}},
         ]
         registries = [
             [{"entity_id": "binary_sensor.front_door", "device_id": "d1", "area_id": None},
-             {"entity_id": "sensor.temp", "device_id": None, "area_id": "kitchen"}],
-            [{"area_id": "hall", "name": "Hall"}, {"area_id": "kitchen", "name": "Kitchen"}],
-            [{"id": "d1", "area_id": "hall"}],
+             {"entity_id": "binary_sensor.front_door_motion", "device_id": "d1", "area_id": "porch"},
+             {"entity_id": "sensor.front_door_battery", "device_id": "d1", "entity_category": "diagnostic"},
+             {"entity_id": "sensor.temp", "device_id": "gone", "area_id": "kitchen", "hidden_by": "user"}],
+            [{"area_id": "hall", "name": "Hall"}, {"area_id": "kitchen", "name": "Kitchen"},
+             {"area_id": "porch", "name": "Porch"}],
+            [{"id": "d1", "area_id": "hall", "name": "Front door", "name_by_user": None, "manufacturer": "Ring"},
+             {"id": "unused", "name": "Unused"}, {"id": "gone", "name": "Gone", "disabled_by": "user"}],
         ]
         with patch("bdh_sdk.ha.get_all_states", return_value=states), \
                 patch("bdh_sdk.ha.ws_commands", return_value=registries):
-            resp = self.client.get("/cameras/settings/popups/entities/")
-        self.assertEqual(resp.json()["entities"], [
-            {"id": "binary_sensor.front_door", "name": "Front Door", "area": "Hall", "state": "off",
-             "domain": "binary_sensor", "device_class": "door", "suggest": True},
-            {"id": "sensor.temp", "name": "sensor.temp", "area": "Kitchen", "state": "20",
-             "domain": "sensor", "device_class": "", "suggest": False},
+            data = self.client.get("/cameras/settings/popups/entities/").json()
+        door = {"domain": "binary_sensor", "device": "d1", "category": "", "useful": True, "suggest": True}
+        self.assertEqual(data["entities"], [
+            {"id": "binary_sensor.front_door", "name": "Front Door", "short": "Front Door", "area": "Hall",
+             "state": "off", "device_class": "door", **door},
+            {"id": "sensor.front_door_battery", "name": "Front Door Battery", "short": "Battery", "area": "Hall",
+             "state": "90", "domain": "sensor", "device_class": "", "device": "d1", "category": "diagnostic",
+             "useful": False, "suggest": False},
+            {"id": "binary_sensor.front_door_motion", "name": "Front Door Motion", "short": "Motion",
+             "area": "Porch", "state": "off", "device_class": "motion", **door},
+            {"id": "sensor.temp", "name": "sensor.temp", "short": "sensor.temp", "area": "Kitchen", "state": "20",
+             "domain": "sensor", "device_class": "", "device": "", "category": "hidden", "useful": False,
+             "suggest": False},
         ])
+        self.assertEqual(data["devices"], [{"id": "d1", "name": "Front door", "maker": "Ring", "area": "Hall"}])
 
     def test_entities_ha_down(self):
         from bdh_sdk import ha
