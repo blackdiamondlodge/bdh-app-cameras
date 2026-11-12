@@ -2025,36 +2025,43 @@ class EventWorkerStartTests(TestCase):
 
 
 class RingAlertTests(TestCase):
-    def _handle(self, kinds, seconds_ago, added=True, popup=True):
-        import asyncio
-        worker = ev_mod.SiteWorker({"name": "S", "host": "h", "username": "u", "password": "p"})
-        worker.names = {"cam1": "Doorbell"}
-        row = {"event_id": "r1", "camera_id": "cam1", "kinds": kinds,
-               "start": datetime.now(dt_tz.utc) - timedelta(seconds=seconds_ago), "end": None, "score": 0}
+    def setUp(self):
+        self.worker = ev_mod.SiteWorker({"name": "S", "host": "h", "username": "u", "password": "p"})
+        self.worker.names = {"cam1": "Doorbell"}
 
         async def fake_in_db(fn, *args):
             return [] if fn is ev_mod._save else fn(*args)
-        worker._in_db = fake_in_db
+        self.worker._in_db = fake_in_db
+
+    def _handle(self, kinds, seconds_ago=2, wanted=("doorbell",), event_id="r1"):
+        import asyncio
+        row = {"event_id": event_id, "camera_id": "cam1", "kinds": kinds,
+               "start": datetime.now(dt_tz.utc) - timedelta(seconds=seconds_ago), "end": None, "score": 0}
         pushed = []
 
         async def fake_push(*args):
             pushed.append(args)
-        with patch.object(ev_mod, "_push_ring_alert", fake_push), \
-                patch("cameras.config.doorbell_popup", return_value=popup), \
+        with patch.object(ev_mod, "_push_popup", fake_push), \
+                patch("cameras.popups.camera_kinds", return_value=list(wanted)), \
                 patch("cameras.config.popup_seconds", return_value=45):
-            asyncio.run(worker._handle(row, added))
+            asyncio.run(self.worker._handle(row))
         return pushed
 
     def test_fresh_ring_pushes_alert(self):
-        self.assertEqual(self._handle(["doorbell"], 2), [("cam1", "Doorbell", 45)])
+        self.assertEqual(self._handle(["doorbell"]), [("cam1", "Doorbell", 45, "doorbell")])
 
-    def test_old_or_updated_or_non_ring_does_not_push(self):
-        self.assertEqual(self._handle(["doorbell"], 120), [])
-        self.assertEqual(self._handle(["doorbell"], 2, added=False), [])
-        self.assertEqual(self._handle(["person"], 2), [])
+    def test_old_or_unwanted_does_not_push(self):
+        self.assertEqual(self._handle(["doorbell"], seconds_ago=120), [])
+        self.assertEqual(self._handle(["person"], event_id="r2"), [])
+        self.assertEqual(self._handle(["doorbell"], wanted=(), event_id="r3"), [])
 
-    def test_popup_setting_off(self):
-        self.assertEqual(self._handle(["doorbell"], 2, popup=False), [])
+    def test_each_kind_pops_up_once_per_event(self):
+        wanted = ("person", "package")
+        self.assertEqual(self._handle([], wanted=wanted), [])
+        self.assertEqual(self._handle(["person"], wanted=wanted), [("cam1", "Doorbell", 45, "person")])
+        self.assertEqual(self._handle(["person"], wanted=wanted), [])
+        self.assertEqual(self._handle(["person", "package"], wanted=wanted),
+                         [("cam1", "Doorbell", 45, "package")])
 
     def test_push_builds_alert(self):
         import asyncio
@@ -2065,11 +2072,15 @@ class RingAlertTests(TestCase):
         fake.push = MagicMock()
         with patch.dict(sys.modules, {"bdh_sdk.alerts": fake}), \
                 patch("bdh_sdk.alerts", fake, create=True):
-            asyncio.run(ev_mod._push_ring_alert("cam1", "Front", 45))
-        fake.push.assert_called_once_with({
+            asyncio.run(ev_mod._push_popup("cam1", "Front", 45))
+            asyncio.run(ev_mod._push_popup("cam1", "Front", 45, "vehicle"))
+        self.assertEqual([c.args[0] for c in fake.push.call_args_list], [{
             "app": "cameras", "key": "doorbell:cam1", "title": "Someone's at the door (Front)",
             "embed_url": "/cameras/popup/cam1/", "ttl": 45,
-        })
+        }, {
+            "app": "cameras", "key": "doorbell:cam1", "title": "Vehicle at Front",
+            "embed_url": "/cameras/popup/cam1/", "ttl": 45,
+        }])
 
 
 class EventViewTests(TestCase):
@@ -2237,6 +2248,172 @@ class EventPopupConfigTests(TestCase):
         self.assertFalse(popups_mod.triggered({"old": "on", "new": "on"}))
         self.assertTrue(popups_mod.triggered({"anything": 1}))
         self.assertTrue(popups_mod.triggered(None))
+
+    def test_matches_uses_domain_defaults(self):
+        m = popups_mod.matches
+        door = {"entity_id": "binary_sensor.door"}
+        self.assertTrue(m(door, {"old": "off", "new": "on"}))
+        self.assertFalse(m(door, {"old": "on", "new": "off"}))
+        self.assertFalse(m(door, {"old": "unavailable", "new": "on"}))
+        self.assertTrue(m({"entity_id": "binary_sensor.door", "to": "off"}, {"old": "on", "new": "off"}))
+        lock = {"entity_id": "lock.front"}
+        self.assertTrue(m(lock, {"old": "locked", "new": "unlocked"}))
+        self.assertFalse(m(lock, {"old": "unlocked", "new": "locked"}))
+        ring = {"entity_id": "event.doorbell"}
+        self.assertTrue(m(ring, {"old": "2026-01-01T00:00:00", "new": "2026-01-01T00:01:00"}))
+        self.assertTrue(m(ring, {"old": "unknown", "new": "2026-01-01T00:01:00"}))
+        self.assertFalse(m(ring, {"old": "2026-01-01T00:01:00", "new": "unavailable"}))
+        other = {"entity_id": "input_select.mode"}
+        self.assertTrue(m(other, {"old": "a", "new": "b"}))
+        self.assertFalse(m(other, {"old": "b", "new": "b"}))
+        self.assertFalse(m(other, {"hook": 1}))
+
+    def test_clean_drops_bad_parts(self):
+        cfg = popups_mod.clean({"enabled": False, "cameras": {
+            "cam1": {"kinds": ["person", "nope", "doorbell"], "triggers": [
+                {"entity_id": "lock.front", "to": " unlocked "},
+                {"entity_id": "lock.front", "to": "unlocked"},
+                {"entity_id": "Bad Id"}, "x", {"entity_id": "event.ring", "to": ""}]},
+            "cam2": {"kinds": [], "triggers": []},
+            "cam3": "nope",
+        }})
+        self.assertEqual(cfg, {"enabled": False, "cameras": {"cam1": {
+            "kinds": ["doorbell", "person"],
+            "triggers": [{"entity_id": "lock.front", "to": "unlocked"}, {"entity_id": "event.ring"}]}}})
+        self.assertEqual(popups_mod.clean("junk"), {"enabled": True, "cameras": {}})
+
+    def test_title_for(self):
+        self.assertEqual(popups_mod.title_for({"entity_id": "lock.front", "new": "unlocked",
+                                               "attributes": {"friendly_name": "Front lock"}}, "Cam"),
+                         "Front lock unlocked")
+        self.assertEqual(popups_mod.title_for({"entity_id": "event.ring", "new": "x"}, "Cam"), "Cam")
+
+
+class PopupStoredConfigTests(TestCase):
+    CAMS = [{"name": "Home", "cameras": [
+        {"camera_id": "cam1", "name": "Front Door", "is_doorbell": True},
+        {"camera_id": "cam2", "name": "Drive", "is_doorbell": False}]}]
+
+    def setUp(self):
+        from bdh_sdk import alerts, events
+        from bdh_sdk.storage import app_state
+        self.state = app_state("cameras")
+        self.addCleanup(self.state.delete, popups_mod.STATE_KEY)
+        self.events = events
+        events.reset()
+        self.pushed = []
+        old = alerts._sender
+        alerts.set_sender(self.pushed.append)
+        self.addCleanup(alerts.set_sender, old)
+        self.addCleanup(events.reset)
+        self.addCleanup(popups_mod.stop)
+        for target, kw in (
+            ("cameras.config.popup_seconds", {"return_value": 45}),
+            ("cameras.protect_api.get_protect_cameras", {"return_value": self.CAMS}),
+        ):
+            p = patch(target, **kw)
+            p.start()
+            self.addCleanup(p.stop)
+
+    @override_settings(BDH_CAMERAS_DOORBELL_POPUP=True, BDH_CAMERAS_EVENT_POPUPS={
+        "ha/state/binary_sensor.front_door": "front door", "hook/#": "Drive"})
+    def test_legacy_settings_until_saved(self):
+        self.assertEqual(popups_mod.camera_kinds("cam1"), ["doorbell"])
+        self.assertEqual(popups_mod.current(), {"enabled": True, "cameras": {"cam1": {
+            "kinds": ["doorbell"], "triggers": [{"entity_id": "binary_sensor.front_door"}]}}})
+
+    def test_saved_triggers_pop_up_their_camera(self):
+        popups_mod.start()
+        popups_mod.save({"cameras": {
+            "cam2": {"kinds": ["vehicle"], "triggers": [{"entity_id": "lock.gate"}]}}})
+        self.assertEqual(popups_mod.camera_kinds("cam2"), ["vehicle"])
+        self.assertEqual(popups_mod.camera_kinds("cam1"), [])
+        self.events.publish("ha/state/lock.gate", {"entity_id": "lock.gate", "old": "locked", "new": "unlocked",
+                                                   "attributes": {"friendly_name": "Gate"}})
+        self.events.publish("ha/state/lock.gate", {"entity_id": "lock.gate", "old": "unlocked", "new": "locked"})
+        self.events.flush(5)
+        self.assertEqual([(a.as_dict()["key"], a.as_dict()["title"]) for a in self.pushed],
+                         [("doorbell:cam2", "Gate unlocked")])
+
+    def test_master_switch_off(self):
+        popups_mod.start()
+        popups_mod.save({"enabled": False, "cameras": {
+            "cam2": {"kinds": ["vehicle"], "triggers": [{"entity_id": "lock.gate"}]}}})
+        self.assertEqual(popups_mod.camera_kinds("cam2"), [])
+        self.events.publish("ha/state/lock.gate", {"old": "locked", "new": "unlocked"})
+        self.events.flush(5)
+        self.assertEqual(self.pushed, [])
+
+
+class PopupSettingsViewTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        from bdh_sdk.storage import app_state
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.addCleanup(app_state("cameras").delete, popups_mod.STATE_KEY)
+        self.addCleanup(popups_mod.stop)
+        self.is_admin = False
+        for target, kw in (
+            ("cameras.views.is_admin", {"side_effect": lambda request: self.is_admin}),
+            ("cameras.views.get_protect_cameras", {"return_value": PopupStoredConfigTests.CAMS}),
+            ("cameras.protect_api.get_protect_cameras", {"return_value": PopupStoredConfigTests.CAMS}),
+        ):
+            p = patch(target, **kw)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_admins_only(self):
+        self.assertEqual(self.client.get("/cameras/settings/popups/").status_code, 404)
+        self.assertEqual(self.client.get("/cameras/settings/popups/entities/").status_code, 404)
+        self.assertEqual(self.client.post("/cameras/settings/popups/", "{}",
+                                          content_type="application/json").status_code, 404)
+
+    def test_page_and_save(self):
+        self.is_admin = True
+        resp = self.client.get("/cameras/settings/popups/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="cp-data"')
+        self.assertContains(resp, "Front Door")
+        resp = self.client.post("/cameras/settings/popups/", json.dumps({"cameras": {
+            "cam1": {"kinds": ["person"], "triggers": [{"entity_id": "event.ring"}]}}}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        saved = {"enabled": True, "cameras": {"cam1": {"kinds": ["person"], "triggers": [{"entity_id": "event.ring"}]}}}
+        self.assertEqual(resp.json(), saved)
+        self.assertEqual(popups_mod.stored(), saved)
+        self.assertEqual(self.client.post("/cameras/settings/popups/", "{nope",
+                                          content_type="application/json").status_code, 400)
+
+    def test_entities(self):
+        self.is_admin = True
+        states = [
+            {"entity_id": "binary_sensor.front_door", "state": "off",
+             "attributes": {"friendly_name": "Front Door", "device_class": "door"}},
+            {"entity_id": "sensor.temp", "state": "20", "attributes": {}},
+        ]
+        registries = [
+            [{"entity_id": "binary_sensor.front_door", "device_id": "d1", "area_id": None},
+             {"entity_id": "sensor.temp", "device_id": None, "area_id": "kitchen"}],
+            [{"area_id": "hall", "name": "Hall"}, {"area_id": "kitchen", "name": "Kitchen"}],
+            [{"id": "d1", "area_id": "hall"}],
+        ]
+        with patch("bdh_sdk.ha.get_all_states", return_value=states), \
+                patch("bdh_sdk.ha.ws_commands", return_value=registries):
+            resp = self.client.get("/cameras/settings/popups/entities/")
+        self.assertEqual(resp.json()["entities"], [
+            {"id": "binary_sensor.front_door", "name": "Front Door", "area": "Hall", "state": "off",
+             "domain": "binary_sensor", "device_class": "door", "suggest": True},
+            {"id": "sensor.temp", "name": "sensor.temp", "area": "Kitchen", "state": "20",
+             "domain": "sensor", "device_class": "", "suggest": False},
+        ])
+
+    def test_entities_ha_down(self):
+        from bdh_sdk import ha
+        self.is_admin = True
+        with patch("bdh_sdk.ha.get_all_states", side_effect=ha.HAError("down")), \
+                self.assertLogs("cameras.views", "WARNING"):
+            self.assertEqual(self.client.get("/cameras/settings/popups/entities/").status_code, 503)
 
 
 @override_settings(BDH_CAMERAS_EVENT_POPUPS={

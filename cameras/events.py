@@ -16,12 +16,14 @@ from datetime import datetime, timedelta, timezone
 
 from django.db import close_old_connections
 
-from . import config
+from . import config, popups
 
 logger = logging.getLogger(__name__)
 
 HISTORY = timedelta(hours=24)
-RING_FRESH = timedelta(seconds=30)
+# A detection older than this when it arrives doesn't pop up (e.g. after a reconnect).
+POPUP_FRESH = timedelta(seconds=30)
+POPPED_MAX = 200
 PRUNE_EVERY = 3600
 THUMB_SIZE = 360
 TIMEOUT = 30
@@ -150,16 +152,26 @@ def prune():
     return ProtectEvent.objects.filter(start__lt=djtz.now() - HISTORY).delete()[0]
 
 
-async def _push_ring_alert(camera_id, camera_name, ttl):
+_KIND_LABEL = {"person": "Person", "vehicle": "Vehicle", "package": "Package", "animal": "Animal"}
+
+
+def popup_title(kind, camera_name):
+    if kind == "doorbell":
+        return f"Someone's at the door ({camera_name})" if camera_name else "Someone's at the door"
+    label = _KIND_LABEL.get(kind, kind.capitalize())
+    return f"{label} at {camera_name}" if camera_name else f"{label} detected"
+
+
+async def _push_popup(camera_id, camera_name, ttl, kind="doorbell"):
     try:
         from bdh_sdk import alerts
     except ImportError:
-        logger.info("Doorbell ring on %s; bdh_sdk.alerts not available, no pop-up", camera_name)
+        logger.info("%s on %s; bdh_sdk.alerts not available, no pop-up", kind, camera_name)
         return
     alert = alerts.Alert(
         app="cameras",
         key=f"doorbell:{camera_id}",
-        title=f"Someone's at the door ({camera_name})" if camera_name else "Someone's at the door",
+        title=popup_title(kind, camera_name),
         embed_url=f"/cameras/popup/{camera_id}/",
         ttl=ttl,
     )
@@ -169,7 +181,7 @@ async def _push_ring_alert(camera_id, camera_name, ttl):
         else:
             await asyncio.get_running_loop().run_in_executor(None, alerts.push, alert)
     except Exception:
-        logger.exception("Doorbell pop-up failed")
+        logger.exception("Camera pop-up failed")
 
 
 class SiteWorker:
@@ -181,6 +193,8 @@ class SiteWorker:
         self.client = None
         self.camera_ids = set()
         self.names = {}
+        # event_id -> kinds already popped up, so updates to an event don't pop up again.
+        self._popped = {}
         self.loop = None
         self._db_pool = ThreadPoolExecutor(1, thread_name_prefix=f"cameras-db-{self.host}")
         self._thread = threading.Thread(
@@ -290,21 +304,38 @@ class SiteWorker:
         row = normalize_obj(event)
         if row is None:
             return
-        added = _enum_value(msg.action) == "add"
-        asyncio.get_running_loop().create_task(self._handle(row, added))
+        asyncio.get_running_loop().create_task(self._handle(row))
 
-    async def _handle(self, row, added):
+    async def _handle(self, row):
         try:
             missing = await self._in_db(_save, self.site, self.host, self.names, [row])
-            if (added and "doorbell" in row["kinds"]
-                    and datetime.now(timezone.utc) - row["start"] < RING_FRESH
-                    and await self._in_db(config.doorbell_popup)):
-                ttl = await self._in_db(config.popup_seconds)
-                await _push_ring_alert(row["camera_id"], self.names.get(row["camera_id"], ""), ttl)
+            await self._popup(row)
             if missing and self.client is not None:
                 await self._fetch_thumbs(self.client, missing)
         except Exception:
             logger.exception("Failed to store Protect event %s", row["event_id"])
+
+    async def _popup(self, row):
+        """Pop up the camera for a fresh detection of a kind it is set to pop up for.
+
+        Smart detections often arrive as updates to an event that started as
+        plain motion, so each kind pops up at most once per event.
+        """
+        if datetime.now(timezone.utc) - row["start"] >= POPUP_FRESH:
+            return
+        popped = self._popped.get(row["event_id"], set())
+        new = [k for k in popups.POPUP_KINDS if k in row["kinds"] and k not in popped]
+        if not new:
+            return
+        wanted = set(await self._in_db(popups.camera_kinds, row["camera_id"]))
+        fire = [k for k in new if k in wanted]
+        if not fire:
+            return
+        self._popped[row["event_id"]] = popped | set(fire)
+        while len(self._popped) > POPPED_MAX:
+            del self._popped[next(iter(self._popped))]
+        ttl = await self._in_db(config.popup_seconds)
+        await _push_popup(row["camera_id"], self.names.get(row["camera_id"], ""), ttl, fire[0])
 
     def submit(self, coro_fn):
         """Run ``coro_fn(client)`` on this worker's loop; returns a concurrent Future."""

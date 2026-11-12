@@ -27,24 +27,28 @@ it on. Choose which ones show up in the app's Settings.
 
 - Signed-in staff get a "Last 24 hours" rail, plus a time scrubber on a full-screen camera
   for snapshots and replay. Guests only see live video.
-- On a doorbell ring the app pushes a hub alert that embeds `/cameras/popup/<camera_id>/`,
-  a live-only page. You can turn the pop-up off and set how long it stays open in Settings.
+- A pop-up is a hub alert that embeds `/cameras/popup/<camera_id>/`, a live-only page. Choose
+  what pops up each camera on the Pop-ups settings page (below); set how long it stays open in
+  Settings.
 
-## Event pop-ups
+## Pop-ups
 
-The app can also pop up a camera when a hub event fires (`bdh_sdk.events`), for example a door
-opening in Home Assistant. Map event topics to Protect camera names (case-insensitive) in the
-site's `site.toml`:
+Admins choose what pops up each camera on **Settings → Pop-ups** (`/cameras/settings/popups/`):
 
-```toml
-[apps.cameras]
-event_popups = { "ha/state/binary_sensor.front_door" = "Front Door" }
-```
+- **Detections:** Ring (doorbells only), Person, Vehicle, Package or Animal. A detection pops up
+  once per Protect event, and only within 30 seconds of the event starting.
+- **Also when:** any Home Assistant entity, picked with a search box (empty search suggests doors,
+  locks, motion sensors and `event.*` entities near the camera). By default a binary sensor fires
+  on `on`, a lock on `unlocked` and an `event.*` entity on each new event; other entities fire on
+  any state change, or on the state you choose under "becomes".
 
-or as JSON in `BDH_CAMERAS_EVENT_POPUPS`. A state change pops up only on `off` → `on`; any other
-event (e.g. a webhook) always pops up. The pop-up shares the doorbell's alert, so a ring or another
-event while it is showing just restarts its timer (`popup_seconds`). Turn it off with the
-"Event pop-ups" setting. Changes to `event_popups` need a hub restart.
+A master switch turns all pop-ups off. Changes apply at once. A pop-up shares one alert per camera,
+so another trigger while it is showing just restarts its timer (`popup_seconds`).
+
+Until the page is first saved, the old settings still apply (and pre-fill the page): a ring pops up
+its doorbell when `doorbell_popup` is on, and when `event_popup` is on each topic in the site's
+`event_popups` (`site.toml` `[apps.cameras]` or JSON in `BDH_CAMERAS_EVENT_POPUPS`) pops up the
+camera it names. Once saved, `event_popups` is ignored and can be removed.
 
 ## Screen saver
 

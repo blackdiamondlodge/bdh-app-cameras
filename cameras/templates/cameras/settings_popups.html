@@ -1,0 +1,292 @@
+{% extends 'hub_settings/_layout.html' %}
+
+{% block title %}Pop-ups · Settings{% endblock %}
+
+{% block section %}
+<style>
+    .cp-cam { display: block; }
+    .cp-cam .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .cp-cam .top .lbl { flex: 1; min-width: 160px; }
+    .cp-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .cp-chip { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--mut); border-radius: 999px; padding: 7px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
+    .cp-chip.on { border-color: var(--acc); background: rgba(91,164,230,.16); color: #eef3fa; }
+    .cp-chip:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+    .cp-also { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .cp-also > small { color: var(--mut); font-size: 13.5px; margin-right: 4px; }
+    .cp-trig { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 14px; font-size: 14px; background: rgba(255,255,255,.04); }
+    .cp-trig em { font-style: normal; color: var(--mut); }
+    .cp-trig button { border: 0; background: transparent; color: var(--mut); cursor: pointer; font-size: 15px; width: 26px; height: 26px; border-radius: 50%; }
+    .cp-trig button:hover { color: var(--red); background: rgba(255,154,154,.12); }
+    .cp-add { border: 1px dashed var(--line); background: transparent; color: var(--acc2); border-radius: 999px; padding: 6px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
+    .cp-off .cp-cam { opacity: .45; }
+    #cp-status { min-width: 80px; text-align: right; color: var(--mut); font-size: 14px; }
+    #cp-status.bad { color: var(--red); }
+    .cp-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: flex-start; justify-content: center; z-index: 50; padding: 6vh 16px 16px; }
+    .cp-modal.open { display: flex; }
+    .cp-box { background: var(--card); border: 1px solid var(--line); border-radius: 22px; width: min(620px, 100%); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+    .cp-box header { padding: 18px 22px 12px; }
+    .cp-box header b { font-size: 17px; font-weight: 500; }
+    .cp-box header input { width: 100%; margin-top: 12px; box-sizing: border-box; }
+    .cp-list { overflow-y: auto; padding: 0 10px 10px; flex: 1; }
+    .cp-list h4 { margin: 10px 12px 6px; color: var(--mut); font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+    .cp-ent { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; padding: 10px 12px; border-radius: 12px; cursor: pointer; font-family: inherit; font-size: 15px; }
+    .cp-ent:hover, .cp-ent.sel { background: rgba(91,164,230,.14); }
+    .cp-ent span { flex: 1; min-width: 0; }
+    .cp-ent small { display: block; color: var(--mut); font-size: 12.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cp-ent i { font-style: normal; color: var(--mut); font-size: 13px; flex: none; }
+    .cp-foot { border-top: 1px solid var(--line); padding: 14px 22px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .cp-foot .what { flex: 1; min-width: 180px; font-size: 14.5px; }
+    .cp-foot .what small { display: block; color: var(--mut); }
+    .cp-msg { color: var(--mut); padding: 14px 12px; font-size: 14px; }
+</style>
+
+{% csrf_token %}
+<div class="hst-head">
+    <div>
+        <h2>Pop-ups</h2>
+        <p>Show a camera live on the hub screen when it sees something, or when something happens in Home Assistant.</p>
+    </div>
+    <div class="act"><a class="hst-btn ghost" style="display:flex;align-items:center;text-decoration:none" href="{% url 'hub_settings_app' 'cameras' %}">‹ Cameras settings</a></div>
+</div>
+
+<div class="hst-card">
+    <div class="hst-row">
+        <div class="lbl"><b>Pop-ups</b><small>Turn every camera pop-up on or off. How long they stay up is under Cameras settings.</small></div>
+        <div class="ctl"><span id="cp-status" aria-live="polite"></span><label class="hst-tog"><input type="checkbox" id="cp-enabled" aria-label="Pop-ups on"><span></span></label></div>
+    </div>
+</div>
+
+<div id="cp-sites"></div>
+
+<div class="cp-modal" id="cp-modal" role="dialog" aria-modal="true" aria-labelledby="cp-modal-title">
+    <div class="cp-box">
+        <header>
+            <b id="cp-modal-title">Pop up</b>
+            <input class="hst-in txt" id="cp-search" type="search" placeholder="Search entities, rooms or IDs" autocomplete="off">
+        </header>
+        <div class="cp-list" id="cp-list"></div>
+        <div class="cp-foot">
+            <div class="what" id="cp-what"><small>Pick an entity</small></div>
+            <span id="cp-to-wrap"></span>
+            <button class="hst-btn ghost" type="button" id="cp-cancel">Cancel</button>
+            <button class="hst-btn" type="button" id="cp-ok" disabled>Add</button>
+        </div>
+    </div>
+</div>
+
+{{ page|json_script:"cp-data" }}
+<script>
+(function () {
+    const page = JSON.parse(document.getElementById('cp-data').textContent);
+    const cfg = page.config;
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const KIND_LABEL = {doorbell: 'Ring', person: 'Person', vehicle: 'Vehicle', package: 'Package', animal: 'Animal'};
+    // States offered for "becomes"; other domains get a text box.
+    const STATES = {
+        binary_sensor: ['on', 'off'], lock: ['unlocked', 'locked', 'open', 'jammed'],
+        cover: ['open', 'closed', 'opening'], person: ['home', 'not_home'], device_tracker: ['home', 'not_home'],
+        switch: ['on', 'off'], input_boolean: ['on', 'off'], light: ['on', 'off'], fan: ['on', 'off'],
+        alarm_control_panel: ['triggered', 'armed_away', 'armed_home', 'disarmed'],
+    };
+    const DEFAULT_TO = {binary_sensor: 'on', lock: 'unlocked'};
+    const OPENINGS = ['door', 'garage_door', 'opening', 'window'];
+    let entities = null, byId = {};
+
+    const el = (tag, props, ...kids) => {
+        const n = Object.assign(document.createElement(tag), props || {});
+        kids.forEach(k => k != null && n.append(k));
+        return n;
+    };
+    const camCfg = id => cfg.cameras[id] || (cfg.cameras[id] = {kinds: [], triggers: []});
+    const domainOf = id => id.split('.')[0];
+
+    function stateWord(entityId, to) {
+        const e = byId[entityId], d = domainOf(entityId);
+        const v = to || DEFAULT_TO[d];
+        if (!v) return d === 'event' ? '' : 'changes';
+        if (d === 'binary_sensor' && e && OPENINGS.includes(e.device_class)) return v === 'on' ? 'opens' : 'closes';
+        if (d === 'binary_sensor' && v === 'on') return 'detects';
+        if (d === 'binary_sensor' && v === 'off') return 'clears';
+        return v.replace(/_/g, ' ');
+    }
+    function trigLabel(t) {
+        const e = byId[t.entity_id];
+        return [e ? e.name : t.entity_id, stateWord(t.entity_id, t.to)];
+    }
+
+    // ---- saving ----
+    const status = document.getElementById('cp-status');
+    let saveTimer = null, saving = Promise.resolve();
+    function save() {
+        clearTimeout(saveTimer);
+        status.className = ''; status.textContent = 'Saving…';
+        saveTimer = setTimeout(() => {
+            const body = JSON.stringify(cfg);
+            saving = saving.then(() => fetch(page.save_url, {
+                method: 'POST', body, credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            }).then(r => {
+                if (!r.ok) throw new Error(r.status);
+                status.textContent = 'Saved ✓';
+            }).catch(() => { status.className = 'bad'; status.textContent = 'Not saved'; }));
+        }, 400);
+    }
+
+    // ---- cameras ----
+    const enabled = document.getElementById('cp-enabled');
+    const sitesEl = document.getElementById('cp-sites');
+    enabled.checked = cfg.enabled;
+    enabled.addEventListener('change', () => { cfg.enabled = enabled.checked; sitesEl.classList.toggle('cp-off', !cfg.enabled); save(); });
+    sitesEl.classList.toggle('cp-off', !cfg.enabled);
+
+    function renderCam(cam) {
+        const c = camCfg(cam.id);
+        const row = el('div', {className: 'hst-row cp-cam'});
+        const chips = el('div', {className: 'cp-chips', role: 'group', ariaLabel: cam.name + ' detections'});
+        page.kinds.filter(k => k !== 'doorbell' || cam.doorbell).forEach(k => {
+            const b = el('button', {type: 'button', className: 'cp-chip', textContent: KIND_LABEL[k]});
+            const sync = () => { const on = c.kinds.includes(k); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); };
+            b.addEventListener('click', () => {
+                c.kinds = c.kinds.includes(k) ? c.kinds.filter(x => x !== k) : page.kinds.filter(x => x === k || c.kinds.includes(x));
+                sync(); save();
+            });
+            sync(); chips.append(b);
+        });
+        row.append(el('div', {className: 'top'},
+            el('div', {className: 'lbl'}, el('b', {textContent: cam.name}),
+               el('small', {textContent: cam.doorbell ? 'Doorbell · pops up when it detects' : 'Pops up when it detects'})),
+            chips));
+        const also = el('div', {className: 'cp-also'}, el('small', {textContent: 'Also when'}));
+        c.triggers.forEach((t, i) => {
+            const [name, word] = trigLabel(t);
+            const x = el('button', {type: 'button', textContent: '✕', title: 'Remove', ariaLabel: 'Remove ' + name});
+            x.addEventListener('click', () => { c.triggers.splice(i, 1); render(); save(); });
+            also.append(el('span', {className: 'cp-trig', title: t.entity_id}, name, word ? el('em', {textContent: word}) : null, x));
+        });
+        const add = el('button', {type: 'button', className: 'cp-add', textContent: '+ Add'});
+        add.addEventListener('click', () => openPicker(cam));
+        also.append(add);
+        row.append(also);
+        return row;
+    }
+    function render() {
+        sitesEl.replaceChildren();
+        if (!page.sites.length) {
+            sitesEl.append(el('div', {className: 'hst-card'}, el('div', {className: 'hst-row'},
+                el('span', {className: 'hst-none', textContent: 'No cameras found. Check the UniFi Protect settings.'}))));
+            return;
+        }
+        page.sites.forEach(site => {
+            const card = el('div', {className: 'hst-card'});
+            if (page.sites.length > 1 || site.name) card.append(el('h3', {textContent: site.name || 'Cameras'}));
+            site.cameras.forEach(cam => card.append(renderCam(cam)));
+            sitesEl.append(card);
+        });
+    }
+
+    // ---- entity picker ----
+    const modal = document.getElementById('cp-modal'), search = document.getElementById('cp-search');
+    const list = document.getElementById('cp-list'), what = document.getElementById('cp-what');
+    const toWrap = document.getElementById('cp-to-wrap'), ok = document.getElementById('cp-ok');
+    let pickCam = null, picked = null, toInput = null;
+
+    function loadEntities() {
+        if (entities) return Promise.resolve(entities);
+        return fetch(page.entities_url, {credentials: 'same-origin'})
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(d => { entities = d.entities; byId = {}; entities.forEach(e => byId[e.id] = e); return entities; });
+    }
+    function score(e, words) {
+        const name = e.name.toLowerCase(), area = e.area.toLowerCase(), id = e.id.toLowerCase();
+        let s = 0;
+        for (const w of words) {
+            if (name.startsWith(w) || area.startsWith(w)) s += 3;
+            else if (name.includes(w) || area.includes(w)) s += 2;
+            else if (id.includes(w)) s += 1;
+            else return 0;
+        }
+        return s + (e.suggest ? 0.5 : 0);
+    }
+    function entRow(e) {
+        const b = el('button', {type: 'button', className: 'cp-ent' + (picked === e ? ' sel' : '')},
+            el('span', {}, e.name, el('small', {textContent: [e.area, e.id].filter(Boolean).join(' · ')})),
+            el('i', {textContent: e.state}));
+        b.addEventListener('click', () => pick(e));
+        return b;
+    }
+    function showList() {
+        list.replaceChildren();
+        if (!entities) return;
+        const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+        if (!words.length) {
+            // Suggestions: likely triggers, ones in the camera's area first.
+            const camWords = pickCam.name.toLowerCase().split(/\s+/).filter(w => w.length > 2 && w !== 'camera');
+            const near = e => camWords.some(w => (e.area + ' ' + e.name).toLowerCase().includes(w)) ? 1 : 0;
+            const sugg = entities.filter(e => e.suggest).sort((a, b) => near(b) - near(a)).slice(0, 10);
+            list.append(el('h4', {textContent: 'Suggested'}));
+            sugg.forEach(e => list.append(entRow(e)));
+            list.append(el('div', {className: 'cp-msg', textContent: 'Search to find any of ' + entities.length + ' entities.'}));
+            return;
+        }
+        const hits = entities.map(e => [score(e, words), e]).filter(x => x[0] > 0)
+            .sort((a, b) => b[0] - a[0]).slice(0, 50).map(x => x[1]);
+        if (!hits.length) list.append(el('div', {className: 'cp-msg', textContent: 'Nothing matches.'}));
+        hits.forEach(e => list.append(entRow(e)));
+    }
+    function pick(e) {
+        picked = e;
+        what.replaceChildren(el('b', {textContent: e.name}), el('small', {textContent: 'Pops up ' + pickCam.name + ' when it'}));
+        toWrap.replaceChildren();
+        toInput = null;
+        if (e.domain !== 'event') {
+            const opts = STATES[e.domain];
+            const dflt = DEFAULT_TO[e.domain];
+            if (opts) {
+                toInput = el('select', {className: 'hst-in', ariaLabel: 'Becomes'});
+                if (!dflt) toInput.append(el('option', {value: '', textContent: 'changes'}));
+                opts.forEach(v => toInput.append(el('option', {value: v === dflt ? '' : v,
+                    textContent: 'becomes ' + stateWord(e.id, v)})));
+            } else {
+                toInput = el('input', {className: 'hst-in', placeholder: 'any change', maxLength: 64, ariaLabel: 'Becomes (optional)', style: 'width:150px'});
+            }
+            toWrap.append(toInput);
+        } else {
+            what.querySelector('small').textContent = 'Pops up ' + pickCam.name + ' on every event';
+        }
+        ok.disabled = false;
+        showList();
+    }
+    function openPicker(cam) {
+        pickCam = cam; picked = null; toInput = null; ok.disabled = true;
+        document.getElementById('cp-modal-title').textContent = 'Pop up ' + cam.name + ' when…';
+        what.replaceChildren(el('small', {textContent: 'Pick an entity'}));
+        toWrap.replaceChildren();
+        search.value = '';
+        modal.classList.add('open');
+        search.focus();
+        list.replaceChildren(el('div', {className: 'cp-msg', textContent: 'Loading Home Assistant entities…'}));
+        loadEntities().then(showList, () => {
+            list.replaceChildren(el('div', {className: 'cp-msg', textContent: 'Home Assistant is unavailable. Try again shortly.'}));
+            entities = null;
+        });
+    }
+    function closePicker() { modal.classList.remove('open'); pickCam = null; }
+    search.addEventListener('input', showList);
+    document.getElementById('cp-cancel').addEventListener('click', closePicker);
+    modal.addEventListener('click', ev => { if (ev.target === modal) closePicker(); });
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && modal.classList.contains('open')) closePicker(); });
+    ok.addEventListener('click', () => {
+        if (!picked || !pickCam) return;
+        const to = toInput ? toInput.value.trim() : '';
+        const t = to ? {entity_id: picked.id, to} : {entity_id: picked.id};
+        const c = camCfg(pickCam.id);
+        if (!c.triggers.some(x => x.entity_id === t.entity_id && (x.to || '') === to)) c.triggers.push(t);
+        closePicker(); render(); save();
+    });
+
+    render();
+    // Friendly names for the chips once the entity list arrives.
+    if (Object.values(cfg.cameras).some(c => c.triggers.length)) loadEntities().then(render, () => {});
+})();
+</script>
+{% endblock %}

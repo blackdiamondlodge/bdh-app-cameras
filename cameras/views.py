@@ -10,11 +10,12 @@ from functools import wraps
 from bdh_sdk import is_admin
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET, require_POST
 
-from . import config, events, frames
+from . import config, events, frames, popups
 from .models import ProtectEvent
 from .protect_api import get_protect_cameras, ptz_goto_preset
 
@@ -388,3 +389,128 @@ def ptz_goto(request):
             {'success': False, 'error': str(e)},
             status=400,
         )
+
+
+# ---- Pop-ups settings page ---------------------------------------------------
+
+POPUP_STATES_TTL = 60
+POPUP_AREAS_TTL = 600
+# Domains whose entities are worth suggesting before the admin searches.
+_SUGGEST_DOMAINS = ("event", "lock")
+_SUGGEST_CLASSES = {"door", "garage_door", "opening", "window", "motion", "occupancy", "presence"}
+
+
+def _settings_admin_only(view):
+    """Settings pages don't exist for anyone but admins."""
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        if not is_admin(request):
+            raise Http404()
+        return view(request, *args, **kwargs)
+    return wrapped
+
+
+@_settings_admin_only
+def popup_settings(request):
+    if request.method == "POST":
+        try:
+            raw = json.loads(request.body or b"{}")
+        except ValueError:
+            return JsonResponse({"error": "bad JSON"}, status=400)
+        return JsonResponse(popups.save(raw))
+    sites = []
+    try:
+        for site in get_protect_cameras():
+            cams = [
+                {"id": c["camera_id"], "name": c.get("name") or c["camera_id"],
+                 "doorbell": bool(c.get("is_doorbell"))}
+                for c in site.get("cameras", []) if c.get("camera_id")
+            ]
+            if cams:
+                sites.append({"name": site.get("name") or "", "cameras": cams})
+    except Exception:
+        logger.exception("Could not list cameras for the pop-ups page")
+    try:
+        cfg = popups.current()
+    except Exception:
+        logger.exception("Could not read the pop-up settings")
+        cfg = popups.clean({})
+    return render(request, "cameras/settings_popups.html", {
+        "active": "cameras",
+        "page": {
+            "sites": sites, "config": cfg, "kinds": list(popups.POPUP_KINDS),
+            "save_url": request.path,
+            "entities_url": reverse("cameras_popup_entities"),
+        },
+    })
+
+
+def _ha_areas():
+    """``{entity_id: area name}`` from HA's registries, cached."""
+    from django.core.cache import cache
+
+    areas = cache.get("cameras:popup_areas")
+    if areas is None:
+        from bdh_sdk import ha
+
+        entities, area_list, devices = ha.ws_commands(
+            {"type": "config/entity_registry/list"},
+            {"type": "config/area_registry/list"},
+            {"type": "config/device_registry/list"},
+        )
+        names = {a["area_id"]: a.get("name") or "" for a in area_list or []}
+        device_area = {d["id"]: d.get("area_id") for d in devices or []}
+        areas = {}
+        for e in entities or []:
+            area_id = e.get("area_id") or device_area.get(e.get("device_id"))
+            if area_id in names:
+                areas[e["entity_id"]] = names[area_id]
+        cache.set("cameras:popup_areas", areas, POPUP_AREAS_TTL)
+    return areas
+
+
+def _suggested(domain, device_class):
+    return domain in _SUGGEST_DOMAINS or (
+        domain == "binary_sensor" and device_class in _SUGGEST_CLASSES)
+
+
+@_settings_admin_only
+@require_GET
+def popup_entities(request):
+    """Every HA entity, for the trigger picker: ``[{id, name, area, state, domain, device_class, suggest}]``."""
+    from django.core.cache import cache
+
+    entities = cache.get("cameras:popup_entities")
+    if entities is None:
+        from bdh_sdk import ha
+
+        try:
+            states = ha.get_all_states()
+        except ha.HAError as err:
+            logger.warning("Pop-ups: HA states unavailable: %s", err)
+            return JsonResponse({"error": "Home Assistant unavailable"}, status=503)
+        try:
+            areas = _ha_areas()
+        except ha.HAError as err:
+            logger.warning("Pop-ups: HA areas unavailable: %s", err)
+            areas = {}
+        entities = []
+        for st in states:
+            entity_id = st.get("entity_id") or ""
+            if "." not in entity_id:
+                continue
+            attrs = st.get("attributes") or {}
+            domain = entity_id.split(".", 1)[0]
+            device_class = attrs.get("device_class") or ""
+            entities.append({
+                "id": entity_id,
+                "name": attrs.get("friendly_name") or entity_id,
+                "area": areas.get(entity_id, ""),
+                "state": st.get("state") or "",
+                "domain": domain,
+                "device_class": device_class,
+                "suggest": _suggested(domain, device_class),
+            })
+        entities.sort(key=lambda e: (e["name"].lower(), e["id"]))
+        cache.set("cameras:popup_entities", entities, POPUP_STATES_TTL)
+    return JsonResponse({"entities": entities})
