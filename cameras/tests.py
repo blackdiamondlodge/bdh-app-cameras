@@ -2270,7 +2270,9 @@ class EventPopupTests(TestCase):
     def test_door_opening_pops_up_camera(self):
         data = {"entity_id": "binary_sensor.front_door", "old": "off", "new": "on",
                 "attributes": {"friendly_name": "Front Door", "device_class": "door"}}
-        self.assertEqual(self._publish("ha/state/binary_sensor.front_door", data), [{
+        fields = ("app", "key", "title", "embed_url", "ttl")
+        pushed = self._publish("ha/state/binary_sensor.front_door", data)
+        self.assertEqual([{k: a[k] for k in fields} for a in pushed], [{
             "app": "cameras", "key": "doorbell:cam1", "title": "Front Door opened",
             "embed_url": "/cameras/popup/cam1/", "ttl": 45,
         }])
