@@ -37,10 +37,13 @@ Admins choose what pops up each camera on **Settings â†’ Pop-ups** (`/cameras/se
 
 - **Detections:** Ring (doorbells only), Person, Vehicle, Package or Animal. A detection pops up
   once per Protect event, and only within 30 seconds of the event starting.
-- **Also when:** any Home Assistant entity, picked with a search box (empty search suggests doors,
-  locks, motion sensors and `event.*` entities near the camera). By default a binary sensor fires
-  on `on`, a lock on `unlocked` and an `event.*` entity on each new event; other entities fire on
-  any state change, or on the state you choose under "becomes".
+- **Also pop up when:** any Home Assistant entity. Pick a device (grouped by room, rooms named like
+  the camera first), then one of its entities, then what it does ("opens", "turns on", "unlocks"…),
+  or search devices and entities by name, room or ID. Devices with no trigger-like entities
+  (binary sensors, locks, covers, switches, `event.*`…) and diagnostic/config entities are hidden
+  until you ask for them. By default a binary sensor fires on `on`, a lock on `unlocked` and an
+  `event.*` entity on each new event; other entities fire on any state change, or on the state
+  you choose. Tap a trigger to change or remove it.
 
 A master switch turns all pop-ups off. Changes apply at once. A pop-up shares one alert per camera,
 so another trigger while it is showing just restarts its timer (`popup_seconds`).

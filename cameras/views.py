@@ -394,10 +394,17 @@ def ptz_goto(request):
 # ---- Pop-ups settings page ---------------------------------------------------
 
 POPUP_STATES_TTL = 60
-POPUP_AREAS_TTL = 600
+POPUP_REGISTRY_TTL = 600
 # Domains whose entities are worth suggesting before the admin searches.
 _SUGGEST_DOMAINS = ("event", "lock")
 _SUGGEST_CLASSES = {"door", "garage_door", "opening", "window", "motion", "occupancy", "presence"}
+# Domains whose state changes make sense as a pop-up trigger; a device's other
+# entities (sensors, numbers, updates...) sit behind "Show more" in the picker.
+_TRIGGER_DOMAINS = {
+    "alarm_control_panel", "binary_sensor", "button", "cover", "device_tracker", "event", "fan",
+    "input_boolean", "input_button", "input_select", "light", "lock", "media_player", "person",
+    "select", "siren", "switch", "valve",
+}
 
 
 def _settings_admin_only(view):
@@ -445,12 +452,13 @@ def popup_settings(request):
     })
 
 
-def _ha_areas():
-    """``{entity_id: area name}`` from HA's registries, cached."""
+def _ha_registry():
+    """HA's entity/device/area registries, cached: ``{"entities": {entity_id: {area, device,
+    category}}, "devices": {device_id: {name, maker, area}}}``."""
     from django.core.cache import cache
 
-    areas = cache.get("cameras:popup_areas")
-    if areas is None:
+    reg = cache.get("cameras:popup_registry")
+    if reg is None:
         from bdh_sdk import ha
 
         entities, area_list, devices = ha.ws_commands(
@@ -459,14 +467,32 @@ def _ha_areas():
             {"type": "config/device_registry/list"},
         )
         names = {a["area_id"]: a.get("name") or "" for a in area_list or []}
-        device_area = {d["id"]: d.get("area_id") for d in devices or []}
-        areas = {}
+        devs = {}
+        for d in devices or []:
+            if d.get("id") and not d.get("disabled_by"):
+                devs[d["id"]] = {
+                    "name": d.get("name_by_user") or d.get("name") or "",
+                    "maker": d.get("manufacturer") or "",
+                    "area": names.get(d.get("area_id"), ""),
+                }
+        ents = {}
         for e in entities or []:
-            area_id = e.get("area_id") or device_area.get(e.get("device_id"))
-            if area_id in names:
-                areas[e["entity_id"]] = names[area_id]
-        cache.set("cameras:popup_areas", areas, POPUP_AREAS_TTL)
-    return areas
+            device_id = e.get("device_id") if e.get("device_id") in devs else ""
+            area = names.get(e.get("area_id")) or (devs[device_id]["area"] if device_id else "")
+            category = e.get("entity_category") or ("hidden" if e.get("hidden_by") else "")
+            ents[e["entity_id"]] = {"area": area, "device": device_id, "category": category}
+        reg = {"entities": ents, "devices": devs}
+        cache.set("cameras:popup_registry", reg, POPUP_REGISTRY_TTL)
+    return reg
+
+
+def _short_name(name, device_name):
+    """``name`` without its device's name in front ("Front Door Motion" -> "Motion")."""
+    if device_name and name.lower().startswith(device_name.lower()):
+        rest = name[len(device_name):].lstrip(" -:�")
+        if rest:
+            return rest
+    return name
 
 
 def _suggested(domain, device_class):
@@ -477,11 +503,15 @@ def _suggested(domain, device_class):
 @_settings_admin_only
 @require_GET
 def popup_entities(request):
-    """Every HA entity, for the trigger picker: ``[{id, name, area, state, domain, device_class, suggest}]``."""
+    """HA's entities and devices, for the trigger picker.
+
+    ``entities``: ``[{id, name, short, area, state, domain, device_class, device, category,
+    useful, suggest}]``; ``devices``: ``[{id, name, maker, area}]`` (only ones with entities).
+    """
     from django.core.cache import cache
 
-    entities = cache.get("cameras:popup_entities")
-    if entities is None:
+    data = cache.get("cameras:popup_entities2")
+    if data is None:
         from bdh_sdk import ha
 
         try:
@@ -490,11 +520,12 @@ def popup_entities(request):
             logger.warning("Pop-ups: HA states unavailable: %s", err)
             return JsonResponse({"error": "Home Assistant unavailable"}, status=503)
         try:
-            areas = _ha_areas()
+            reg = _ha_registry()
         except ha.HAError as err:
-            logger.warning("Pop-ups: HA areas unavailable: %s", err)
-            areas = {}
-        entities = []
+            logger.warning("Pop-ups: HA registries unavailable: %s", err)
+            reg = {"entities": {}, "devices": {}}
+        devices = reg["devices"]
+        entities, used = [], set()
         for st in states:
             entity_id = st.get("entity_id") or ""
             if "." not in entity_id:
@@ -502,15 +533,30 @@ def popup_entities(request):
             attrs = st.get("attributes") or {}
             domain = entity_id.split(".", 1)[0]
             device_class = attrs.get("device_class") or ""
+            info = reg["entities"].get(entity_id) or {}
+            device_id = info.get("device") or ""
+            name = attrs.get("friendly_name") or entity_id
+            category = info.get("category") or ""
+            used.add(device_id)
             entities.append({
                 "id": entity_id,
-                "name": attrs.get("friendly_name") or entity_id,
-                "area": areas.get(entity_id, ""),
+                "name": name,
+                "short": _short_name(name, devices[device_id]["name"] if device_id else ""),
+                "area": info.get("area") or "",
                 "state": st.get("state") or "",
                 "domain": domain,
                 "device_class": device_class,
+                "device": device_id,
+                "category": category,
+                "useful": domain in _TRIGGER_DOMAINS and not category,
                 "suggest": _suggested(domain, device_class),
             })
         entities.sort(key=lambda e: (e["name"].lower(), e["id"]))
-        cache.set("cameras:popup_entities", entities, POPUP_STATES_TTL)
-    return JsonResponse({"entities": entities})
+        data = {
+            "entities": entities,
+            "devices": sorted(
+                ({"id": d, **devices[d]} for d in used if d),
+                key=lambda d: (d["name"].lower(), d["id"])),
+        }
+        cache.set("cameras:popup_entities2", data, POPUP_STATES_TTL)
+    return JsonResponse(data)
