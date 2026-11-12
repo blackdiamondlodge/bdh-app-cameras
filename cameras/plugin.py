@@ -31,6 +31,8 @@ spec = PluginSpec(
         Setting("event_popup", "Event pop-ups", type=BOOL, default=True,
                 help="Show a camera live when one of the site's event_popups fires, "
                      "e.g. the front door opening."),
+        Setting("keep_open", "Leave cameras open when idle", type=BOOL, default=True,
+                help="Keep the cameras page on screen instead of switching to the screen saver."),
         Setting("popup_seconds", "Pop-up duration", type=INT, default=60,
                 minimum=10, maximum=600, unit="s"),
     ),

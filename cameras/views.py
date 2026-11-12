@@ -190,6 +190,7 @@ def camera_feed_view(request):
         'go2rtc_port': go2rtc_port,
         'is_admin': is_admin(request),
         'event_kinds': config.enabled_event_kinds(),
+        'keep_open': config.keep_open(),
     })
 
 
