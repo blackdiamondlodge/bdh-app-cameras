@@ -394,6 +394,9 @@
         pointer-events: none;
     }
     .cam-card.scrubbing .cam-replay { visibility: hidden; }
+    /* Hold the preview frame over the replay video until it starts playing. */
+    .cam-card:fullscreen.replaying.loading .cam-still[src] { display: block; z-index: 2; }
+    .cam-still.low { filter: blur(3px); }
     .cam-card.replaying .cam-status, .cam-card.scrubbing .cam-status { display: none; }
     .cam-replay-tag {
         display: none; position: absolute; top: 24px; right: 96px; z-index: 3; padding: 7px 14px; border-radius: 999px;
@@ -1045,7 +1048,8 @@
                 this.dragging = false;
                 clearTimeout(this.popTimer);
                 this.popTimer = setTimeout(() => this.showPop(null), POP_LINGER_MS);
-                this.replay(this.t);
+                this.snapNext = null;
+                this.replay(this.t, true);
             };
             this.track.addEventListener('pointerup', end);
             this.track.addEventListener('pointercancel', end);
@@ -1137,7 +1141,8 @@
                     el = document.createElement('img');
                     el.className = 'scrub-frame';
                     el.alt = '';
-                    el.dataset.ts = Math.round(this.clampT(Math.min(t + fs / 2, Date.now() - 15000)) / 1000);
+                    // Protect needs ~a minute before the newest footage can be snapshotted.
+                    el.dataset.ts = Math.round(this.clampT(Math.min(t + fs / 2, Date.now() - 60000)) / 1000);
                     this.frames.set(t, el);
                     this.strip.appendChild(el);
                     this.frameQ.push(el);
@@ -1213,21 +1218,41 @@
             this.card.classList.add('scrubbing');
             this.card.classList.remove('replaying');
             this.render();
-            this.requestSnap(Math.round(t / 1000));
+            this.showLowRes(t);
+            this.snapWant = Math.round(t / 1000);
+            this.requestSnap(this.snapWant);
+        }
+        // Instant preview: the nearest already-loaded filmstrip thumbnail, blurred.
+        showLowRes(t) {
+            let best = null, bestD = Infinity;
+            for (const el of this.frames.values()) {
+                if (!el.classList.contains('ready')) continue;
+                const d = Math.abs(el.dataset.ts * 1000 - t);
+                if (d < bestD) { best = el; bestD = d; }
+            }
+            if (best && bestD <= this.stripFs) {
+                this.still.src = best.src;
+                this.still.classList.add('low');
+            }
         }
         requestSnap(ts) {
             if (this.snapBusy) { this.snapNext = ts; return; }
             this.snapBusy = true;
             const img = new Image();
             img.onload = img.onerror = () => {
-                if (img.naturalWidth && this.mode === 'still') this.still.src = img.src;
+                const showing = this.mode === 'still' || this.card.classList.contains('loading');
+                if (img.naturalWidth && this.snapWant !== null && Math.abs(ts - this.snapWant) <= 30 && showing) {
+                    this.still.src = img.src;
+                    this.still.classList.remove('low');
+                }
                 this.snapBusy = false;
                 if (this.snapNext !== null) { const n = this.snapNext; this.snapNext = null; this.requestSnap(n); }
             };
             img.src = SNAP_URL(this.cam, ts);
         }
 
-        replay(t) {
+        replay(t, keepStill = false) {
+            if (!keepStill) { this.still.removeAttribute('src'); this.snapWant = null; }
             t = Math.max(Date.now() - 24 * H, Math.min(t, Date.now() - 5000));
             this.mode = 'replay';
             this.t = t;
