@@ -512,6 +512,8 @@ class CameraFeedViewWithProtectTests(TestCase):
         # Camera names are displayed
         self.assertContains(response, "Front Door")
         self.assertContains(response, "Backyard")
+        # Live cameras hold off the hub screensaver while open
+        self.assertContains(response, '<meta name="bdh-screensaver" content="off">')
         # Uses the correct video-stream custom element (not video-rtc)
         self.assertIn("<video-stream", content)
         self.assertNotIn("<video-rtc", content)
