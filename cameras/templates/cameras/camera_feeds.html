@@ -10,7 +10,9 @@ PERFORMANCE: this page runs on UniFi Connect displays (Chrome on a weak GPU) dec
 9 live WebRTC streams at once. Animations that repaint (background-position, box-shadow,
 filter, width/height, moving gradients) starve the GPU and Chrome drops video frames for
 seconds, which trips the WebRTC->MSE fallback. Only animate opacity/transform, keep it
-to a few elements, and test on a real display. See README "Display performance".
+to a few elements, and test on a real display. Never put backdrop-filter on anything that
+sits over live video: the blur is recomputed every video frame, and blurred pills on 9 tiles
+dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display performance".
 {% endcomment %}
 <style>
     body {
@@ -124,10 +126,8 @@ to a few elements, and test on a real display. See README "Display performance".
         max-width: calc(100% - 24px);
         padding: 6px 12px;
         border-radius: 999px;
-        background: rgba(10,18,28,.55);
+        background: rgba(10,18,28,.7);
         border: 1px solid rgba(255,255,255,.12);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         font-size: 13px;
         font-weight: 600;
         letter-spacing: .02em;
@@ -148,10 +148,8 @@ to a few elements, and test on a real display. See README "Display performance".
         gap: 6px;
         padding: 4px 10px;
         border-radius: 999px;
-        background: rgba(10,18,28,.55);
+        background: rgba(10,18,28,.7);
         border: 1px solid rgba(255,255,255,.12);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         font-size: 10px;
         font-weight: 700;
         letter-spacing: .14em;
@@ -194,10 +192,8 @@ to a few elements, and test on a real display. See README "Display performance".
         gap: 6px;
         padding: 5px;
         border-radius: 999px;
-        background: rgba(10,18,28,.55);
+        background: rgba(10,18,28,.7);
         border: 1px solid rgba(255,255,255,.12);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
     }
     .cam-card:hover .ptz-controls,
     .cam-card.hero .ptz-controls,
@@ -248,9 +244,7 @@ to a few elements, and test on a real display. See README "Display performance".
         height: 56px;
         border-radius: 50%;
         border: 1px solid rgba(255,255,255,.15);
-        background: rgba(10,18,28,.55);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+        background: rgba(10,18,28,.7);
         color: #fff;
         font-size: 22px;
         display: flex;
