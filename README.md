@@ -62,6 +62,19 @@ camera it names. Once saved, `event_popups` is ignored and can be removed.
 While the cameras page is open the hub screen saver stays off, so the cameras stay on screen.
 Turn this off with the "Leave cameras open when idle" setting (`keep_open`).
 
+## Display performance
+
+The hubs run on UniFi Connect displays: Chrome on a weak GPU, decoding up to 9 live WebRTC
+streams at once. Keep the camera pages cheap to draw:
+
+- Animate only `opacity` or `transform`, on as few elements as possible. Animations that repaint
+  (`background-position`, gradients, `box-shadow`, `filter`, size changes) starve the GPU, and
+  Chrome drops incoming video frames until they stop.
+- In 1.7.3 a `background-position` shimmer on the tiles held back first video by 3–5 s and
+  sometimes tripped the 6 s WebRTC→MSE fallback. The opacity pulse that replaced it (1.7.4)
+  plays all tiles in about 2–3 s.
+- A desktop browser will not show the problem. Test UI changes on a real display.
+
 ## Development
 
 CI (`.github/workflows/ci.yml`) uses the reusable `app-ci.yml` from

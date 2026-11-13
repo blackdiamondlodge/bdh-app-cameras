@@ -5,6 +5,13 @@
 {% block extra_head %}{% if keep_open %}<meta name="bdh-screensaver" content="off">{% endif %}{% endblock %}
 
 {% block content %}
+{% comment %}
+PERFORMANCE: this page runs on UniFi Connect displays (Chrome on a weak GPU) decoding up to
+9 live WebRTC streams at once. Animations that repaint (background-position, box-shadow,
+filter, width/height, moving gradients) starve the GPU and Chrome drops video frames for
+seconds, which trips the WebRTC->MSE fallback. Only animate opacity/transform, keep it
+to a few elements, and test on a real display. See README "Display performance".
+{% endcomment %}
 <style>
     body {
         background: radial-gradient(ellipse 120% 80% at 50% 0%, #1d3350 0%, #0c1622 55%, #060a10 100%) fixed !important;
