@@ -685,6 +685,41 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     }
 
     const WEBRTC_TIMEOUT = 6000;
+    const RTC_DIAG_URL = '{% url "camera_rtc_diag" %}';
+    const pageT0 = Date.now();
+
+    // Send the dying peer connection's stats to the hub log, so a fallback
+    // leaves evidence of why WebRTC didn't play (no frames vs not decoding).
+    // getStats() must be called before pc.close(); it resolves afterwards.
+    function reportFallback(el, src, reason) {
+        const pc = el.pc;
+        const v = el.video;
+        const report = {
+            src, reason,
+            ua: navigator.userAgent,
+            pageAgeS: Math.round((Date.now() - pageT0) / 1000),
+            visible: document.visibilityState,
+            activeTiles: document.querySelectorAll('video-stream[data-active]').length,
+            video: v && { readyState: v.readyState, paused: v.paused, w: v.videoWidth,
+                          err: v.error && v.error.code },
+            pc: pc && { cs: pc.connectionState, ice: pc.iceConnectionState,
+                        sig: pc.signalingState },
+        };
+        const send = () => fetch(RTC_DIAG_URL, {
+            method: 'POST', body: JSON.stringify(report), keepalive: true,
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        }).catch(() => {});
+        if (!pc) { send(); return; }
+        pc.getStats().then(stats => {
+            report.stats = [];
+            stats.forEach(s => {
+                if (s.type === 'inbound-rtp' || (s.type === 'candidate-pair' && s.nominated)) {
+                    report.stats.push(Object.fromEntries(Object.entries(s).filter(
+                        ([k, val]) => typeof val !== 'object' && !/Id$|^id$|^timestamp$/.test(k))));
+                }
+            });
+        }).catch(e => { report.statsErr = String(e); }).finally(send);
+    }
 
     // Start a stream WebRTC-only (no MSE warm-up, so no mid-start source
     // swap).  If WebRTC isn't playing within WEBRTC_TIMEOUT, or the peer
@@ -706,11 +741,12 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
 
         const card = el.closest('.cam-card');
         const isLive = () => card && card.dataset.state === 'live';
-        const fallBack = () => {
+        const fallBack = reason => {
             clearTimeout(el._fallbackTID);
             clearInterval(el._fallbackPoll);
             if (!el.dataset.active || el._streamUrl !== url || isLive()) return;
             console.warn(`WebRTC failed for ${src}; falling back to ${fallback}`);
+            reportFallback(el, src, reason);
             safeDisconnect(el);
             // Next tick, so the old socket's close event can't clobber the new one
             setTimeout(() => {
@@ -719,7 +755,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
                 el.src = url;
             }, 0);
         };
-        el._fallbackTID = setTimeout(fallBack, WEBRTC_TIMEOUT);
+        el._fallbackTID = setTimeout(() => fallBack('timeout'), WEBRTC_TIMEOUT);
         el._fallbackPoll = setInterval(() => {
             if (isLive() || !el.dataset.active) {
                 clearTimeout(el._fallbackTID);
@@ -728,7 +764,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
                              : el.wsState === WebSocket.OPEN) {
                 // go2rtc nulls el.pc when the peer connection fails, and
                 // closes it when the server rejects the offer
-                fallBack();
+                fallBack(el.pc ? 'pc-' + el.pc.connectionState : 'pc-gone');
             }
         }, 500);
     }

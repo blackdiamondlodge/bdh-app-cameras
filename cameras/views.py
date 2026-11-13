@@ -394,6 +394,32 @@ def ptz_goto(request):
         )
 
 
+RTC_DIAG_MAX_BYTES = 16 * 1024
+
+
+@require_POST
+def rtc_diag(request):
+    """Log a browser's WebRTC stats when a tile gives up and falls back to MSE.
+
+    The fallback is otherwise silent server-side; these stats (frames
+    received vs decoded, decoder, ICE state) show *why* WebRTC didn't play.
+    """
+    if len(request.body) > RTC_DIAG_MAX_BYTES:
+        return JsonResponse({'error': 'too large'}, status=413)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'bad json'}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({'error': 'bad json'}, status=400)
+    logger.warning(
+        "WebRTC fallback from %s: %s",
+        request.META.get('REMOTE_ADDR'),
+        json.dumps(data, separators=(',', ':'), sort_keys=True),
+    )
+    return HttpResponse(status=204)
+
+
 # ---- Pop-ups settings page ---------------------------------------------------
 
 POPUP_STATES_TTL = 60

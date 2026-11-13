@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('', views.camera_feed_view, name='cameras'),
     path('ptz/goto/', views.ptz_goto, name='ptz_goto'),
+    path('diag/rtc/', views.rtc_diag, name='camera_rtc_diag'),
     path('events/', views.events_json, name='camera_events'),
     path('events/<str:event_id>/thumb/', views.event_thumb, name='camera_event_thumb'),
     path('snapshot/<str:camera_id>/', views.snapshot, name='camera_snapshot'),
