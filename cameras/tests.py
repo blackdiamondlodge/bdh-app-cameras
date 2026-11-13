@@ -2238,6 +2238,9 @@ class EventTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["X-Frame-Options"], "SAMEORIGIN")
         self.assertContains(resp, 'data-stream-name="front_door"')
+        # WebRTC first (no MSE race -> no black flash), MSE only on failure.
+        self.assertContains(resp, 'data-mode="webrtc"')
+        self.assertContains(resp, 'data-fallback-mode="mse"')
         self.assertNotContains(resp, "cam-scrub")
         mock_register.assert_called_once()
         self.assertEqual(Client().get("/cameras/popup/nope/").status_code, 404)

@@ -19,23 +19,61 @@
 </style>
 </head>
 <body data-state="connecting">
-<video-stream data-stream-name="{{ stream }}"></video-stream>
+<video-stream data-stream-name="{{ stream }}" data-mode="webrtc" data-fallback-mode="mse"></video-stream>
 <div class="state">LIVE</div>
 <script type="module">
     const base = `http://${window.location.hostname}:{{ go2rtc_port }}`;
     await import(`${base}/video-stream.js`);
-    const el = document.querySelector('video-stream');
     await customElements.whenDefined('video-stream');
-    el.background = true;
-    el.src = `${base}/api/ws?src=${encodeURIComponent(el.dataset.streamName)}`;
-    const v = el.video;
-    if (v) {
-        v.muted = true;
-        v.controls = false;
-        v.playsInline = true;
-        v.addEventListener('playing', () => { document.body.dataset.state = 'live'; });
-        v.addEventListener('waiting', () => { document.body.dataset.state = 'connecting'; });
+    const WEBRTC_TIMEOUT = 6000;
+
+    // WebRTC only (running MSE alongside swaps the source mid-start and
+    // flashes black).  If WebRTC isn't playing within WEBRTC_TIMEOUT, or the
+    // peer connection gives up, replace the player with an MSE one.
+    function start(el, mode) {
+        el.background = true;
+        el.mode = mode;
+        el.src = `${base}/api/ws?src=${encodeURIComponent(el.dataset.streamName)}`;
+        const v = el.video;
+        let live = false;
+        if (v) {
+            v.muted = true;
+            v.controls = false;
+            v.playsInline = true;
+            v.addEventListener('playing', () => { live = true; document.body.dataset.state = 'live'; });
+            v.addEventListener('waiting', () => { document.body.dataset.state = 'connecting'; });
+        }
+        const fallback = el.dataset.fallbackMode;
+        if (!fallback || fallback === mode) return;
+        const fallBack = () => {
+            clearTimeout(tid);
+            clearInterval(poll);
+            if (live) return;
+            console.warn(`WebRTC failed for ${el.dataset.streamName}; falling back to ${fallback}`);
+            const next = el.cloneNode(false);
+            el.replaceWith(next);
+            // background players don't tear down when removed; do it now
+            clearTimeout(el.reconnectTID);
+            el.reconnectTID = 0;
+            el.ondisconnect();
+            start(next, fallback);
+        };
+        const tid = setTimeout(fallBack, WEBRTC_TIMEOUT);
+        const poll = setInterval(() => {
+            if (live) {
+                clearTimeout(tid);
+                clearInterval(poll);
+            } else if (el.pc ? ['failed', 'closed'].includes(el.pc.connectionState)
+                             : el.wsState === WebSocket.OPEN) {
+                // go2rtc nulls el.pc when the peer connection fails, and
+                // closes it when the server rejects the offer
+                fallBack();
+            }
+        }, 500);
     }
+
+    const el = document.querySelector('video-stream');
+    start(el, el.dataset.mode);
 </script>
 </body>
 </html>
