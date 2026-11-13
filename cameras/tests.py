@@ -1203,6 +1203,28 @@ class PtzGotoViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+class RtcDiagViewTests(TestCase):
+    """The WebRTC-fallback diagnostics endpoint logs what the browser saw."""
+
+    def test_logs_stats(self):
+        body = {'src': 'driveway_low', 'reason': 'timeout', 'stats': [{'framesDecoded': 0}]}
+        with self.assertLogs('cameras.views', 'WARNING') as logs:
+            response = self.client.post('/cameras/diag/rtc/', data=json.dumps(body),
+                                        content_type='application/json')
+        self.assertEqual(response.status_code, 204)
+        self.assertIn('"framesDecoded":0', logs.output[0])
+        self.assertIn('"src":"driveway_low"', logs.output[0])
+
+    def test_rejects_oversized_body(self):
+        body = json.dumps({'pad': 'x' * 20000})
+        response = self.client.post('/cameras/diag/rtc/', data=body, content_type='application/json')
+        self.assertEqual(response.status_code, 413)
+
+    def test_rejects_non_object(self):
+        for body in ('not json', '[1, 2]'):
+            response = self.client.post('/cameras/diag/rtc/', data=body, content_type='application/json')
+            self.assertEqual(response.status_code, 400)
+
 # --- PTZ template tests ---
 
 @override_settings(
