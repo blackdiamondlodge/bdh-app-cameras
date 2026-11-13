@@ -100,7 +100,8 @@
 
 {{ page|json_script:"cp-data" }}
 <script>
-(function () {
+// Wait for DOMContentLoaded: the hub's base template loads chimes.js after this block.
+document.addEventListener('DOMContentLoaded', function () {
     const page = JSON.parse(document.getElementById('cp-data').textContent);
     const cfg = page.config;
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
@@ -454,6 +455,6 @@
     render();
     // Friendly names for the chips once the entity list arrives.
     if (Object.values(cfg.cameras).some(c => c.triggers.length)) loadEntities().then(render, () => {});
-})();
+    });
 </script>
 {% endblock %}
