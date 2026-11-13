@@ -446,6 +446,9 @@ def popup_settings(request):
         "active": "cameras",
         "page": {
             "sites": sites, "config": cfg, "kinds": list(popups.POPUP_KINDS),
+            "chimes": list(popups.CHIMES), "silent": popups.SILENT,
+            "kind_sounds": {k: popups.kind_sound(k) for k in popups.POPUP_KINDS},
+            "trigger_sound": popups.TRIGGER_SOUND,
             "save_url": request.path,
             "entities_url": reverse("cameras_popup_entities"),
         },

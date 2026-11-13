@@ -162,7 +162,7 @@ def popup_title(kind, camera_name):
     return f"{label} at {camera_name}" if camera_name else f"{label} detected"
 
 
-async def _push_popup(camera_id, camera_name, ttl, kind="doorbell"):
+async def _push_popup(camera_id, camera_name, ttl, kind="doorbell", sound=None):
     try:
         from bdh_sdk import alerts
     except ImportError:
@@ -174,6 +174,7 @@ async def _push_popup(camera_id, camera_name, ttl, kind="doorbell"):
         title=popup_title(kind, camera_name),
         embed_url=f"/cameras/popup/{camera_id}/",
         ttl=ttl,
+        sound=sound,
     )
     try:
         if hasattr(alerts, "apush"):
@@ -335,7 +336,8 @@ class SiteWorker:
         while len(self._popped) > POPPED_MAX:
             del self._popped[next(iter(self._popped))]
         ttl = await self._in_db(config.popup_seconds)
-        await _push_popup(row["camera_id"], self.names.get(row["camera_id"], ""), ttl, fire[0])
+        sound = await self._in_db(popups.camera_sound, row["camera_id"], fire[0])
+        await _push_popup(row["camera_id"], self.names.get(row["camera_id"], ""), ttl, fire[0], sound)
 
     def submit(self, coro_fn):
         """Run ``coro_fn(client)`` on this worker's loop; returns a concurrent Future."""
