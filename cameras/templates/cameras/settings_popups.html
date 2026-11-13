@@ -4,12 +4,14 @@
 
 {% block section %}
 <style>
+    /* Wider than the hub's 900px default so a camera's detection tiles (with sound pickers) fit on one row. */
+    .hst-main { max-width: 1200px; }
     .cp-cam { display: block; }
     .cp-cam .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .cp-cam .top .lbl { flex: 1; min-width: 160px; }
     .cp-tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-    .cp-tile { flex: 1 1 140px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.04); color: var(--mut); cursor: pointer; }
-    .cp-tile.on { border-color: var(--acc); background: rgba(91,164,230,.13); color: #eef3fa; }
+    .cp-tile { flex: 1 1 0; min-width: 150px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.04); color: var(--mut); cursor: pointer; }
+    .cp-tile.on { flex-grow: 1.4; border-color: var(--acc); background: rgba(91,164,230,.13); color: #eef3fa; }
     .cp-tile > button { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; font-family: inherit; font-size: 15px; font-weight: 500; padding: 10px 12px 0; text-align: left; cursor: pointer; border-radius: 14px 14px 0 0; }
     .cp-ck { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line); display: grid; place-items: center; font-size: 12px; flex: none; box-sizing: border-box; }
     .cp-tile.on .cp-ck { background: var(--acc); border-color: var(--acc); color: #fff; }
