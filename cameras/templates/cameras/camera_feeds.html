@@ -355,15 +355,8 @@
         overscroll-behavior: contain;
     }
     .ev-list::-webkit-scrollbar { display: none; }
-    /* Same bouncing chevron as the snow report / device control apps, scoped to the list. */
-    .ev-scroll-hint {
-        position: absolute; left: 1px; right: 1px; bottom: 1px; height: 64px; border-radius: 0 0 15px 15px;
-        background: linear-gradient(transparent, #18243a); display: flex; justify-content: center;
-        align-items: flex-end; padding-bottom: 8px; pointer-events: none; transition: opacity .4s ease;
-    }
-    .ev-scroll-hint.hidden { opacity: 0; }
-    .ev-scroll-hint i { color: rgba(255,255,255,.6); font-size: 22px; animation: ev-bounce 1.5s infinite; }
-    @keyframes ev-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    /* The hub's shared scroll hint (base.html) adds the bouncing chevron. */
+    .ev-list { --hub-scroll-hint-bg: #18243a; }
     .ev-day { font-size: 11px; letter-spacing: .1em; color: #9fb0c8; padding: 10px 8px 6px; text-transform: uppercase; }
     .ev-item {
         display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; padding: 6px;
@@ -557,7 +550,6 @@
     </div>
     <div class="ev-list-wrap">
         <div class="ev-list"><div class="ev-empty">Loading events…</div></div>
-        <div class="ev-scroll-hint hidden" aria-hidden="true"><i class="fas fa-chevron-down"></i></div>
     </div>
 </aside>
 {% endif %}
@@ -884,13 +876,9 @@
     const rail = document.querySelector('.ev-rail');
     const list = rail.querySelector('.ev-list');
     const count = rail.querySelector('.ev-count');
-    const hint = rail.querySelector('.ev-scroll-hint');
-
     function updateHint() {
-        hint.classList.toggle('hidden', list.scrollTop + list.clientHeight >= list.scrollHeight - 8);
+        if (window.hubScrollHint) window.hubScrollHint.refresh();
     }
-    list.addEventListener('scroll', updateHint, {passive: true});
-    new ResizeObserver(updateHint).observe(list);
 
     const toggle = rail.querySelector('.ev-toggle');
     function setCollapsed(on) {
