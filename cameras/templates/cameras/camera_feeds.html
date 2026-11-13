@@ -1304,15 +1304,19 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             const img = new Image();
             img.onload = img.onerror = () => {
                 this.cardBusy = false;
+                // A frame for a position the pointer has since left still beats the
+                // filmstrip placeholder, but stays blurred so it never reads as exact.
+                const stale = ts !== this.cardWant;
                 if (img.naturalWidth) {
-                    if (!this.popEv && this.pop.classList.contains('show')) {
+                    if (!this.popEv && this.pop.classList.contains('show') &&
+                        (!stale || this.cardTs === null || Math.abs(ts - this.cardWant) < Math.abs(this.cardTs - this.cardWant))) {
                         this.popImg.src = img.src;
-                        this.popImg.classList.remove('low');
+                        this.popImg.classList.toggle('low', stale);
                         this.cardTs = ts;
                     }
                     if (this.dragging && this.mode === 'still') {
                         this.still.src = img.src;
-                        this.still.classList.remove('low');
+                        this.still.classList.toggle('low', stale);
                     }
                 }
                 if (this.cardWant !== null && this.cardWant !== ts) this.loadFrame(this.cardWant);
