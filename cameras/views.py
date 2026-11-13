@@ -292,9 +292,11 @@ def snapshot(request, camera_id):
             resp['Cache-Control'] = 'private, max-age=3600'
             return resp
     try:
+        # Warm widths share one full-size fetch (Protect's cost is ~the same at any width).
+        fetch_w = max(frames.WARM_WIDTHS) if dt is not None and width in frames.WARM_WIDTHS else width
         data = events.run(
             camera_id,
-            lambda client: client.get_camera_snapshot(camera_id, width=width, dt=dt),
+            lambda client: client.get_camera_snapshot(camera_id, width=fetch_w, dt=dt),
         )
     except events.WorkerUnavailable:
         return _unavailable()
@@ -303,6 +305,7 @@ def snapshot(request, camera_id):
     if not data:
         raise Http404
     if key is not None:
+        frames.warm_async(camera_id, key[1], data, width)
         data = frames.resize(data, width)
         frames.put(key, data)
     resp = HttpResponse(data, content_type='image/jpeg')
