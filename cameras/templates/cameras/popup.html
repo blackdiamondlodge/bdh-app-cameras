@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ name }}</title>
+{% comment %}
+PERFORMANCE: runs on UniFi Connect displays (weak GPU). Only animate opacity/transform;
+repainting animations stall WebRTC video decode. See README "Display performance".
+{% endcomment %}
 <style>
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; }
     video-stream, video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
