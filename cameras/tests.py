@@ -1504,6 +1504,26 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         with urllib.request.urlopen(req, timeout=10):
             pass
 
+    def _wait_for_grid_video(self, timeout=20):
+        """Wait for the grid to show frames before the step under test.
+
+        The initial page load isn't what these tests time, and a cold
+        go2rtc producer on a slow CI runner can take >10s to deliver.
+        """
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        WebDriverWait(self.driver, timeout).until(
+            lambda d: d.execute_script("""
+                const els = document.querySelectorAll('video-stream');
+                for (const el of els) {
+                    const v = el.querySelector('video') || el.video;
+                    if (v && v.readyState >= 2) return true;
+                }
+                return false;
+            """),
+            "No grid video reached readyState >= 2",
+        )
+
     def setUp(self):
         self.driver.get('about:blank')
         self.driver.delete_all_cookies()
@@ -1614,16 +1634,7 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
                 "return customElements.get('video-stream') !== undefined"
             )
         )
-        WebDriverWait(self.driver, 10).until(
-            lambda d: d.execute_script("""
-                const els = document.querySelectorAll('video-stream');
-                for (const el of els) {
-                    const v = el.querySelector('video') || el.video;
-                    if (v && v.readyState >= 2) return true;
-                }
-                return false;
-            """)
-        )
+        self._wait_for_grid_video()
 
         # Find test_cam — it's registered in go2rtc by setUpClass and the
         # view falls back to the go2rtc stream list (UNIFI_PROTECT_SITES=[]).
@@ -1685,6 +1696,9 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         self.addCleanup(lambda: urllib.request.urlopen(urllib.request.Request(
             f'{GO2RTC_CI_URL}/api/streams?src=test_cam2', method='DELETE',
         ), timeout=10))
+        # Cleanups run LIFO: leave the page first so its test_cam2 consumers
+        # close cleanly instead of being torn out from under the next test.
+        self.addCleanup(self.driver.get, 'about:blank')
 
         self.driver.get(f'{self.live_server_url}/cameras/')
         WebDriverWait(self.driver, 15).until(
@@ -1743,16 +1757,7 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
                 "return customElements.get('video-stream') !== undefined"
             )
         )
-        WebDriverWait(self.driver, 10).until(
-            lambda d: d.execute_script("""
-                const els = document.querySelectorAll('video-stream');
-                for (const el of els) {
-                    const v = el.querySelector('video') || el.video;
-                    if (v && v.readyState >= 2) return true;
-                }
-                return false;
-            """)
-        )
+        self._wait_for_grid_video()
 
         # Enter fullscreen on the test_cam card
         test_cam = self.driver.find_element(
@@ -1832,16 +1837,7 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
                 "return customElements.get('video-stream') !== undefined"
             )
         )
-        WebDriverWait(self.driver, 10).until(
-            lambda d: d.execute_script("""
-                const els = document.querySelectorAll('video-stream');
-                for (const el of els) {
-                    const v = el.querySelector('video') || el.video;
-                    if (v && v.readyState >= 2) return true;
-                }
-                return false;
-            """)
-        )
+        self._wait_for_grid_video()
 
         # Inject WebSocket error tracker before fullscreen
         self.driver.execute_script("""
