@@ -481,7 +481,8 @@
         <video-stream
             data-stream-name="{{ stream.name }}"
             data-has-low="{% if stream.has_low %}true{% else %}false{% endif %}"
-            data-mode="webrtc,mse,mp4"
+            data-mode="webrtc"
+            data-fallback-mode="mse"
             data-site="{{ forloop.parentloop.counter0 }}">
         </video-stream>
         <div class="cam-touch-overlay"></div>
@@ -650,10 +651,75 @@
             if (card.dataset.state !== 'live' && !v.paused) set('live');
         });
         v.addEventListener('waiting', () => set('connecting'));
-        ['stalled', 'error', 'emptied'].forEach(evt =>
+        // 'emptied' is deliberately not here: it fires on every source swap
+        // (low -> high res, fallback), which isn't a stall.
+        ['stalled', 'error'].forEach(evt =>
             v.addEventListener(evt, () => {
                 if (el.dataset.active) set('reconnecting');
             }));
+    }
+
+    {% if is_admin %}
+    const POSTER_URL = '{% url "camera_snapshot" "CAMID" %}';
+    {% else %}
+    const POSTER_URL = '';
+    {% endif %}
+
+    // Show a recent still instead of black until the first frame arrives.
+    function setPoster(el) {
+        const card = el.closest('.cam-card');
+        const camId = card && card.dataset.cameraId;
+        if (!POSTER_URL || !camId || !el.video || el.video.poster) return;
+        el.video.poster = POSTER_URL.replace('CAMID', encodeURIComponent(camId)) + '?w=640';
+    }
+
+    const WEBRTC_TIMEOUT = 6000;
+
+    // Start a stream WebRTC-only (no MSE warm-up, so no mid-start source
+    // swap).  If WebRTC isn't playing within WEBRTC_TIMEOUT, or the peer
+    // connection gives up, restart the tile on the fallback mode (MSE).
+    function startStream(el, src) {
+        clearTimeout(el._fallbackTID);
+        clearInterval(el._fallbackPoll);
+        const url = `${GO2RTC_BASE}/api/ws?src=${src}`;
+        const fallback = el.dataset.fallbackMode;
+        el.background = true;
+        el.mode = el.dataset.mode;
+        if (el.video) el.video.muted = true;
+        setPoster(el);
+        watchState(el);
+        el.src = url;
+        el._streamUrl = url;
+        el.dataset.active = 'true';
+        if (!fallback || fallback === el.mode) return;
+
+        const card = el.closest('.cam-card');
+        const isLive = () => card && card.dataset.state === 'live';
+        const fallBack = () => {
+            clearTimeout(el._fallbackTID);
+            clearInterval(el._fallbackPoll);
+            if (!el.dataset.active || el._streamUrl !== url || isLive()) return;
+            console.warn(`WebRTC failed for ${src}; falling back to ${fallback}`);
+            safeDisconnect(el);
+            // Next tick, so the old socket's close event can't clobber the new one
+            setTimeout(() => {
+                if (!el.dataset.active) return;
+                el.mode = fallback;
+                el.src = url;
+            }, 0);
+        };
+        el._fallbackTID = setTimeout(fallBack, WEBRTC_TIMEOUT);
+        el._fallbackPoll = setInterval(() => {
+            if (isLive() || !el.dataset.active) {
+                clearTimeout(el._fallbackTID);
+                clearInterval(el._fallbackPoll);
+            } else if (el.pc ? ['failed', 'closed'].includes(el.pc.connectionState)
+                             : el.wsState === WebSocket.OPEN) {
+                // go2rtc nulls el.pc when the peer connection fails, and
+                // closes it when the server rejects the offer
+                fallBack();
+            }
+        }, 500);
     }
 
     // Initialize video-stream elements for a panel (low quality for grid)
@@ -662,13 +728,7 @@
             if (!el.dataset.active) {
                 const streamName = el.dataset.streamName;
                 const hasLow = el.dataset.hasLow === 'true';
-                const src = hasLow ? `${streamName}_low` : streamName;
-                el.background = true;
-                el.mode = el.dataset.mode;
-                if (el.video) el.video.muted = true;
-                watchState(el);
-                el.src = `${GO2RTC_BASE}/api/ws?src=${src}`;
-                el.dataset.active = 'true';
+                startStream(el, hasLow ? `${streamName}_low` : streamName);
             }
         });
     }
@@ -677,6 +737,8 @@
     function stopStreams(panel) {
         panel.querySelectorAll('video-stream').forEach(el => {
             if (el.dataset.active) {
+                clearTimeout(el._fallbackTID);
+                clearInterval(el._fallbackPoll);
                 safeDisconnect(el);
                 delete el.dataset.active;
             }
@@ -770,13 +832,7 @@
             // the new connection lets the close event fire while wsState is
             // still CLOSED, so onclose() exits harmlessly.
             if (fsStream) {
-                setTimeout(() => {
-                    const streamName = fsStream.dataset.streamName;
-                    if (fsStream.video) fsStream.video.muted = true;
-                    watchState(fsStream);
-                    fsStream.src = `${GO2RTC_BASE}/api/ws?src=${streamName}`;
-                    fsStream.dataset.active = 'true';
-                }, 0);
+                setTimeout(() => startStream(fsStream, fsStream.dataset.streamName), 0);
             }
         } else {
             // Exiting fullscreen — restart everything at low quality.

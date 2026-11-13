@@ -533,20 +533,19 @@ class CameraFeedViewWithProtectTests(TestCase):
         self.assertNotIn('video-rtc.js', content)
         # Each camera card has a touch overlay div for fullscreen
         self.assertEqual(content.count('class="cam-touch-overlay"'), 2)
-        # Stream mode must include MSE — go2rtc needs MSE initialized
-        # alongside WebRTC for the WebSocket negotiation to work.
-        # Removing MSE breaks video loading entirely (PR #45 regression).
-        self.assertIn('data-mode="webrtc,mse,mp4"', content)
+        # WebRTC-only first (no MSE warm-up -> no mid-start source swap /
+        # black flash), with MSE as the fallback mode.
+        self.assertIn('data-mode="webrtc"', content)
+        self.assertIn('data-fallback-mode="mse"', content)
 
     @patch("cameras.views._register_streams_with_go2rtc")
     @patch("cameras.views.get_protect_cameras")
-    def test_stream_mode_includes_mse(self, mock_cameras, mock_register):
-        """Stream mode must be 'webrtc,mse,mp4' — MSE is required.
+    def test_stream_mode_webrtc_with_mse_fallback(self, mock_cameras, mock_register):
+        """Tiles start WebRTC-only and fall back to MSE.
 
-        go2rtc uses an if/else-if chain in onopen() to pick the first video
-        protocol (mse > hls > mp4), then adds WebRTC independently. Without
-        MSE, MP4 + WebRTC compete and fail to deliver video. MSE acts as
-        a graceful placeholder that loses the race to WebRTC harmlessly.
+        Running MSE and WebRTC in parallel ('webrtc,mse,mp4') made go2rtc
+        show MSE frames first and then swap the <video> source to WebRTC,
+        blanking every tile mid-start.
         """
         mock_cameras.return_value = [{
             'name': 'Test', 'host': '192.168.10.1',
@@ -560,9 +559,10 @@ class CameraFeedViewWithProtectTests(TestCase):
         response = self.client.get("/cameras/")
         content = response.content.decode()
 
-        self.assertIn('data-mode="webrtc,mse,mp4"', content)
-        # Ensure MSE was not accidentally removed
-        self.assertNotIn('data-mode="webrtc,mp4"', content)
+        self.assertIn('data-mode="webrtc"', content)
+        self.assertIn('data-fallback-mode="mse"', content)
+        self.assertNotIn('data-mode="webrtc,mse', content)
+        self.assertIn('function startStream(el, src)', content)
 
     @patch("cameras.views._register_streams_with_go2rtc")
     @patch("cameras.views.get_protect_cameras")
@@ -1509,12 +1509,7 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         self.driver.delete_all_cookies()
 
     def test_camera_page_renders_video_streams_with_correct_mode(self):
-        """video-stream elements appear with data-mode='webrtc,mse,mp4'.
-
-        This is the key regression test for PR #45: removing MSE from
-        data-mode broke video loading entirely because go2rtc's onopen()
-        if/else-if chain needs MSE as a placeholder protocol.
-        """
+        """video-stream elements start WebRTC-only with an MSE fallback."""
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
@@ -1532,9 +1527,10 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         for el in elements:
             mode = el.get_attribute('data-mode')
             self.assertEqual(
-                mode, 'webrtc,mse,mp4',
-                f"Expected data-mode='webrtc,mse,mp4', got '{mode}'",
+                mode, 'webrtc',
+                f"Expected data-mode='webrtc', got '{mode}'",
             )
+            self.assertEqual(el.get_attribute('data-fallback-mode'), 'mse')
 
     def test_video_stream_custom_element_loads(self):
         """video-stream.js loads from go2rtc and registers the custom element.
