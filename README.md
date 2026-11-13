@@ -73,6 +73,10 @@ streams at once. Keep the camera pages cheap to draw:
 - In 1.7.3 a `background-position` shimmer on the tiles held back first video by 3–5 s and
   sometimes tripped the 6 s WebRTC→MSE fallback. The opacity pulse that replaced it (1.7.4)
   plays all tiles in about 2–3 s.
+- Never use `backdrop-filter` on overlays that sit over live video (labels, status pills, PTZ
+  and fullscreen buttons). The blur is recomputed on every video frame. Up to 1.7.4 the blurred
+  pills on each tile made the display drop ~85% of frames on the 9-camera Sun Peaks tab. A solid
+  70% dark background (1.7.5) looks almost the same and plays at a full 30 fps.
 - A desktop browser will not show the problem. Test UI changes on a real display.
 
 ## Development
