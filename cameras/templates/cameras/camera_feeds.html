@@ -92,21 +92,22 @@
         pointer-events: none;
     }
 
-    /* Shimmer while a stream is connecting */
+    /* Pulse while a stream is connecting */
     .cam-card::before {
         content: "";
         position: absolute;
         inset: 0;
-        background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.06) 50%, transparent 70%);
-        background-size: 250% 100%;
-        animation: cam-shimmer 1.6s linear infinite;
+        background: radial-gradient(ellipse at center, rgba(255,255,255,.07), transparent 70%);
         pointer-events: none;
         opacity: 0;
         transition: opacity .3s ease;
     }
+    /* Opacity-only pulse (compositor) on purpose: a background-position shimmer
+       repaints every tile each frame and starves weak GPUs (UniFi Connect
+       display), stalling WebRTC decode for seconds. */
     .cam-card[data-state="connecting"]::before,
-    .cam-card[data-state="reconnecting"]::before { opacity: 1; }
-    @keyframes cam-shimmer { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+    .cam-card[data-state="reconnecting"]::before { animation: cam-shimmer 1.6s ease-in-out infinite; }
+    @keyframes cam-shimmer { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 
     .cam-label {
         position: absolute;
