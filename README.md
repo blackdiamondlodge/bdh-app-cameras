@@ -78,6 +78,16 @@ streams at once. Keep the camera pages cheap to draw:
   pills on each tile made the display drop ~85% of frames on the 9-camera Sun Peaks tab. A solid
   70% dark background (1.7.5) looks almost the same and plays at a full 30 fps.
 - A desktop browser will not show the problem. Test UI changes on a real display.
+- In the full-screen player the hidden live stream is paused while you scrub or replay, and
+  dropped after 3 s (a paused WebRTC video still decodes); it reconnects when you go back to live.
+
+## Scrubber
+
+Hovering or dragging along the scrubber shows a frame card above the pointer: the frame at that
+time, or the event's thumbnail near an event mark. While dragging, the card and the big image use
+320 px frames; the full 1280 px frame loads on release. A cold Protect fetch at either size fills the
+server cache for both, so release usually hits the cache. Frame times snap to 5 s so nearby
+positions share one browser-cached image.
 
 ## Development
 

@@ -2172,6 +2172,25 @@ class EventViewTests(TestCase):
         client.get_camera_snapshot.assert_called_once_with(
             "cam1", width=160, dt=datetime.fromtimestamp(1_700_000_000, tz=dt_tz.utc))
 
+    def test_scrub_card_frame_warms_full_view_cache(self):
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (2688, 1512), (40, 90, 160)).save(buf, "JPEG")
+        client = MagicMock()
+        client.get_camera_snapshot.return_value = buf.getvalue()
+        with patch("cameras.views.events.run", side_effect=lambda cam, fn, **kw: fn(client)), \
+                patch("cameras.views.frames.warm_async", side_effect=frames_mod.warm):
+            c = self._admin()
+            card = c.get("/cameras/snapshot/cam1/?ts=1700000002&w=320")
+            full = c.get("/cameras/snapshot/cam1/?ts=1700000004&w=1280")
+            c.get("/cameras/snapshot/cam1/?ts=1700000100&w=160")  # filmstrip widths don't warm
+        self.assertEqual(Image.open(io.BytesIO(card.content)).size, (320, 180))
+        self.assertEqual(Image.open(io.BytesIO(full.content)).size, (1280, 720))
+        self.assertEqual(client.get_camera_snapshot.call_count, 2)  # the 1280 came from cache
+        self.assertEqual(client.get_camera_snapshot.call_args_list[0].kwargs["width"], 1280)
+        self.assertIsNone(frames_mod.get(("cam1", 1_700_000_100, 320)))
+
     def test_live_snapshot_is_not_cached(self):
         client = MagicMock()
         client.get_camera_snapshot.return_value = b"live"

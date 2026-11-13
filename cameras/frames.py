@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 CACHE_BYTES = 50 * 1024 * 1024
 TS_STEP = 5  # seconds; scrub positions within this window share a frame
+# The scrubber's frame card asks for 320 px while dragging and the full view
+# for 1280 px on release; a cold fetch at one fills the cache for the other.
+WARM_WIDTHS = (320, 1280)
 
 _cache = OrderedDict()
 _size = 0
@@ -51,6 +54,23 @@ def clear():
     with _lock:
         _cache.clear()
         _size = 0
+
+
+def warm(camera_id, ts, data, width):
+    """Cache ``data`` at the other WARM_WIDTHS (only when ``width`` is one of them)."""
+    if width not in WARM_WIDTHS:
+        return
+    for w in WARM_WIDTHS:
+        key = (camera_id, ts, w)
+        if w == width or get(key) is not None:
+            continue
+        small = resize(data, w)
+        if small is not data:
+            put(key, small)
+
+
+def warm_async(camera_id, ts, data, width):
+    threading.Thread(target=warm, args=(camera_id, ts, data, width), daemon=True).start()
 
 
 def resize(data, width):

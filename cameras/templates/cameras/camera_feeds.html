@@ -446,14 +446,22 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         text-shadow: 0 0 3px #000, 0 0 6px #000;
     }
     .scrub-pop {
-        position: absolute; bottom: 150px; width: 240px; margin-left: -120px; border-radius: 10px; overflow: hidden;
+        position: absolute; bottom: 150px; width: 280px; margin-left: -140px; border-radius: 10px; overflow: hidden;
         background: #0d1626; border: 2px solid var(--c, #5ba4e6); box-shadow: 0 6px 24px rgba(0,0,0,.6);
         opacity: 0; transform: translateY(6px); transition: opacity .15s ease, transform .15s ease; pointer-events: none;
     }
     .scrub-pop.show { opacity: 1; transform: none; }
     .scrub-pop img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #18243a; }
+    .scrub-pop img.low { filter: blur(2px); }
     .scrub-pop-meta { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600; }
     .scrub-pop-kind { color: var(--c, #5ba4e6); }
+    .scrub-pop.plain .scrub-pop-kind { color: #eef3fa; font-variant-numeric: tabular-nums; }
+    .scrub-pop.plain .scrub-pop-time { color: #9fb0c8; font-variant-numeric: tabular-nums; }
+    .scrub-hover {
+        position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 6px #000;
+        pointer-events: none; display: none;
+    }
+    .scrub-hover.show { display: block; }
     .scrub-mark {
         position: absolute; top: 8px; height: 22px; min-width: 4px; border-radius: 3px; background: var(--c, #5ba4e6);
         opacity: .9; pointer-events: none;
@@ -527,6 +535,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
                 <div class="scrub-strip"></div>
                 <div class="scrub-ticks"></div>
                 <div class="scrub-marks"></div>
+                <div class="scrub-hover"></div>
                 <div class="scrub-head live"></div>
             </div>
         </div>
@@ -735,17 +744,42 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         });
     }
 
+    function stopStream(el) {
+        if (!el.dataset.active) return;
+        clearTimeout(el._fallbackTID);
+        clearInterval(el._fallbackPoll);
+        safeDisconnect(el);
+        delete el.dataset.active;
+    }
+
     // Stop all streams in a panel (free bandwidth)
     function stopStreams(panel) {
-        panel.querySelectorAll('video-stream').forEach(el => {
-            if (el.dataset.active) {
-                clearTimeout(el._fallbackTID);
-                clearInterval(el._fallbackPoll);
-                safeDisconnect(el);
-                delete el.dataset.active;
+        panel.querySelectorAll('video-stream').forEach(stopStream);
+    }
+
+    // The scrubber fires cam:live when the fullscreen player leaves/returns to
+    // live.  Away from live, pause the hidden stream, then drop it after a few
+    // seconds (a paused WebRTC <video> keeps receiving and decoding); a quick
+    // replay-and-back resumes instantly instead of reconnecting.
+    const LIVE_DROP_MS = 3000;
+    document.querySelectorAll('.cam-card').forEach(card => {
+        const el = card.querySelector('video-stream');
+        if (!el) return;
+        card.addEventListener('cam:live', e => {
+            clearTimeout(el._liveDropTID);
+            const fs = () => document.fullscreenElement === card;
+            if (!e.detail) {
+                if (el.video) el.video.pause();
+                el._liveDropTID = setTimeout(() => { if (fs()) stopStream(el); }, LIVE_DROP_MS);
+            } else if (fs()) {
+                if (el.dataset.active) {
+                    if (el.video) el.video.play().catch(() => {});
+                } else {
+                    setTimeout(() => startStream(el, el.dataset.streamName), 0);
+                }
             }
         });
-    }
+    });
 
     // Wait for video-stream.js to load before initializing
     go2rtcReady.then(() => {
@@ -909,6 +943,9 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     const STRIP_MIN = { 1: 5, 6: 30, 24: 120 };
     const STRIP_CONCURRENCY = 6;
     const POP_LINGER_MS = 2000;
+    const CARD_PX = 320;  // frame-card width; also the big still while dragging (full res loads on release)
+    // The server buckets frames by 5 s; matching it keeps nearby positions on one browser-cached URL.
+    const snapTs = t => Math.round(t / 5000) * 5;
 
     let events = [];
     let filter = '';
@@ -1053,6 +1090,12 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             this.marks = this.bar.querySelector('.scrub-marks');
             this.strip = this.bar.querySelector('.scrub-strip');
             this.pop = this.bar.querySelector('.scrub-pop');
+            this.popImg = this.pop.querySelector('img');
+            this.hoverLine = this.bar.querySelector('.scrub-hover');
+            this.cardWant = null;
+            this.cardBusy = false;
+            this.cardTs = null;
+            this.liveOn = true;
             this.frames = new Map();
             this.frameQ = [];
             this.frameLoading = 0;
@@ -1087,22 +1130,29 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
                 this.moved = false;
                 // A tap on/near an event snaps to its start; dragging cancels the snap.
                 const ev = this.eventNear(e.clientX);
-                this.showPop(ev, e.clientX);
+                this.showCard(e.clientX, ev);
                 this.scrubTo(ev ? this.clampT(ev.start) : this.timeAt(e.clientX));
             });
             this.track.addEventListener('pointermove', e => {
-                if (!this.dragging) return;
+                if (!this.dragging) {
+                    // Mouse hover previews without moving playback; touch has no hover.
+                    if (e.pointerType === 'mouse') this.showCard(e.clientX);
+                    return;
+                }
                 if (!this.moved && Math.abs(e.clientX - this.downX) < DRAG_PX) return;
                 this.moved = true;
-                this.showPop(this.eventNear(e.clientX), e.clientX);
+                this.showCard(e.clientX);
                 this.scrubTo(this.timeAt(e.clientX));
             });
-            const end = () => {
+            this.track.addEventListener('pointerleave', () => { if (!this.dragging) this.hideCard(); });
+            const end = e => {
                 if (!this.dragging) return;
                 this.dragging = false;
                 clearTimeout(this.popTimer);
-                this.popTimer = setTimeout(() => this.showPop(null), POP_LINGER_MS);
+                if (e.pointerType !== 'mouse') this.popTimer = setTimeout(() => this.hideCard(), POP_LINGER_MS);
                 this.snapNext = null;
+                this.snapWant = snapTs(this.t);
+                this.requestSnap(this.snapWant);
                 this.replay(this.t, true);
             };
             this.track.addEventListener('pointerup', end);
@@ -1195,26 +1245,88 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             }
             return best;
         }
-        showPop(ev, clientX) {
-            if (!ev) {
-                this.pop.classList.remove('show');
-                this.popEv = null;
-                return;
-            }
+        // Frame card: follows the pointer and shows the frame at that spot, or the
+        // event's thumbnail when the pointer is on/near an event mark.
+        showCard(clientX, ev = this.eventNear(clientX)) {
             clearTimeout(this.popTimer);
-            const br = this.bar.getBoundingClientRect(), half = this.pop.offsetWidth / 2 || 120;
-            const x = Math.min(br.width - half - 8, Math.max(half + 8, clientX - br.left));
-            this.pop.style.left = `${x}px`;
-            if (this.popEv !== ev.id) {
-                this.popEv = ev.id;
-                const k = primaryKind(ev);
-                this.pop.style.setProperty('--c', kindColor(k));
-                this.pop.querySelector('img').src = THUMB_URL(ev.id);
-                this.pop.querySelector('.scrub-pop-kind').textContent =
-                    ev.kinds.filter(x => KIND_LABEL[x]).map(x => KIND_LABEL[x]).join(' · ') || KIND_LABEL[k];
-                this.pop.querySelector('.scrub-pop-time').textContent = fmtFull(ev.start);
+            const t = ev ? this.clampT(ev.start) : this.timeAt(clientX);
+            const br = this.bar.getBoundingClientRect(), tr = this.track.getBoundingClientRect();
+            const half = this.pop.offsetWidth / 2 || 140;
+            this.pop.style.left = `${Math.min(br.width - half - 8, Math.max(half + 8, clientX - br.left))}px`;
+            this.hoverLine.style.left = `${Math.min(tr.width, Math.max(0, clientX - tr.left))}px`;
+            const kindEl = this.pop.querySelector('.scrub-pop-kind'), timeEl = this.pop.querySelector('.scrub-pop-time');
+            this.pop.classList.toggle('plain', !ev);
+            if (ev) {
+                if (this.popEv !== ev.id) {
+                    this.popEv = ev.id;
+                    this.cardTs = null;
+                    const k = primaryKind(ev);
+                    this.pop.style.setProperty('--c', kindColor(k));
+                    this.popImg.classList.remove('low');
+                    this.popImg.src = THUMB_URL(ev.id);
+                    kindEl.textContent = ev.kinds.filter(x => KIND_LABEL[x]).map(x => KIND_LABEL[x]).join(' · ') || KIND_LABEL[k];
+                    timeEl.textContent = fmtFull(ev.start);
+                }
+            } else {
+                if (this.popEv) { this.popEv = null; this.cardTs = null; }
+                this.pop.style.removeProperty('--c');
+                kindEl.textContent = fmtFull(t);
+                timeEl.textContent = fmtBehind(Date.now() - t);
+                const ts = snapTs(t);
+                if (this.cardTs !== ts) {
+                    // Nearest filmstrip frame now (blurred), exact frame when it lands.
+                    const near = this.nearestFrame(t);
+                    const nearD = near ? Math.abs(near.dataset.ts - ts) : Infinity;
+                    if (near && (this.cardTs === null || nearD < Math.abs(this.cardTs - ts))) {
+                        this.popImg.src = near.src;
+                        this.popImg.classList.add('low');
+                        this.cardTs = +near.dataset.ts;
+                    }
+                }
             }
+            if (!ev || this.dragging) this.loadFrame(snapTs(t));
             this.pop.classList.add('show');
+            this.hoverLine.classList.add('show');
+        }
+        hideCard() {
+            clearTimeout(this.popTimer);
+            this.pop.classList.remove('show');
+            this.hoverLine.classList.remove('show');
+            this.popEv = null;
+            this.cardWant = null;
+        }
+        // One CARD_PX frame request in flight at a time; the latest position
+        // wins, so a fast drag never queues up stale Protect fetches.
+        loadFrame(ts) {
+            this.cardWant = ts;
+            if (this.cardBusy) return;
+            this.cardBusy = true;
+            const img = new Image();
+            img.onload = img.onerror = () => {
+                this.cardBusy = false;
+                if (img.naturalWidth) {
+                    if (!this.popEv && this.pop.classList.contains('show')) {
+                        this.popImg.src = img.src;
+                        this.popImg.classList.remove('low');
+                        this.cardTs = ts;
+                    }
+                    if (this.dragging && this.mode === 'still') {
+                        this.still.src = img.src;
+                        this.still.classList.remove('low');
+                    }
+                }
+                if (this.cardWant !== null && this.cardWant !== ts) this.loadFrame(this.cardWant);
+            };
+            img.src = SNAP_URL(this.cam, ts, CARD_PX);
+        }
+        nearestFrame(t) {
+            let best = null, bestD = Infinity;
+            for (const el of this.frames.values()) {
+                if (!el.classList.contains('ready')) continue;
+                const d = Math.abs(el.dataset.ts * 1000 - t);
+                if (d < bestD) { best = el; bestD = d; }
+            }
+            return best && bestD <= this.stripFs ? best : null;
         }
         renderStrip() {
             const [a, b] = this.windowRange();
@@ -1312,9 +1424,18 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             this.card.classList.add('scrubbing');
             this.card.classList.remove('replaying');
             this.render();
+            this.setLive(false);
             this.showLowRes(t);
-            this.snapWant = Math.round(t / 1000);
-            this.requestSnap(this.snapWant);
+            // CARD_PX frames (via loadFrame) follow the drag; full res is fetched on release.
+            this.snapWant = snapTs(t);
+            this.loadFrame(this.snapWant);
+        }
+        // Pause the hidden live stream while away from live (it otherwise keeps
+        // decoding WebRTC behind the replay); the page script owns the stream.
+        setLive(on) {
+            if (this.liveOn === on) return;
+            this.liveOn = on;
+            this.card.dispatchEvent(new CustomEvent('cam:live', { detail: on }));
         }
         // Instant preview: the nearest already-loaded filmstrip thumbnail, blurred.
         showLowRes(t) {
@@ -1349,6 +1470,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             if (!keepStill) { this.still.removeAttribute('src'); this.snapWant = null; }
             t = Math.max(Date.now() - 24 * H, Math.min(t, Date.now() - 5000));
             this.mode = 'replay';
+            this.setLive(false);
             this.t = t;
             this.clipStart = t;
             const s = Math.floor(t / 1000);
@@ -1373,6 +1495,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             this.card.classList.remove('replaying', 'scrubbing', 'loading');
             this.setPlayIcon(true);
             this.render();
+            this.setLive(true);
         }
 
         act(a) {
@@ -1413,7 +1536,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     document.addEventListener('fullscreenchange', () => {
         scrubbers.forEach((s, card) => {
             if (document.fullscreenElement !== card && s.mode !== 'live') s.goLive();
-            if (document.fullscreenElement !== card) s.showPop(null);
+            if (document.fullscreenElement !== card) s.hideCard();
         });
         scrubbers.get(document.fullscreenElement)?.render();
     });
