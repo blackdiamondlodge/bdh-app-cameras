@@ -44,9 +44,13 @@ Admins choose what pops up each camera on **Settings â†’ Pop-ups** (`/camer
   until you ask for them. By default a binary sensor fires on `on`, a lock on `unlocked` and an
   `event.*` entity on each new event; other entities fire on any state change, or on the state
   you choose. Tap a trigger to change or remove it.
+- **Sound:** each detection and trigger plays a hub chime when it pops up (Ring: Ding-dong,
+  Person: Notify, other detections: Single ding, triggers: Knock-knock), or pick another chime or
+  Silent; ▶ previews it. Pop-ups are silent in Night mode and the volume is under Settings → Display
+  (needs a hub with chimes, BlackDiamondHub #258).
 
 A master switch turns all pop-ups off. Changes apply at once. A pop-up shares one alert per camera,
-so another trigger while it is showing just restarts its timer (`popup_seconds`).
+so another trigger while it is showing just restarts its timer (`popup_seconds`) without chiming again.
 
 Until the page is first saved, the old settings still apply (and pre-fill the page): a ring pops up
 its doorbell when `doorbell_popup` is on, and when `event_popup` is on each topic in the site's

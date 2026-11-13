@@ -2043,12 +2043,13 @@ class RingAlertTests(TestCase):
             pushed.append(args)
         with patch.object(ev_mod, "_push_popup", fake_push), \
                 patch("cameras.popups.camera_kinds", return_value=list(wanted)), \
+                patch("cameras.popups.camera_sound", side_effect=lambda cam, kind: f"{kind}-chime"), \
                 patch("cameras.config.popup_seconds", return_value=45):
             asyncio.run(self.worker._handle(row))
         return pushed
 
     def test_fresh_ring_pushes_alert(self):
-        self.assertEqual(self._handle(["doorbell"]), [("cam1", "Doorbell", 45, "doorbell")])
+        self.assertEqual(self._handle(["doorbell"]), [("cam1", "Doorbell", 45, "doorbell", "doorbell-chime")])
 
     def test_old_or_unwanted_does_not_push(self):
         self.assertEqual(self._handle(["doorbell"], seconds_ago=120), [])
@@ -2058,10 +2059,10 @@ class RingAlertTests(TestCase):
     def test_each_kind_pops_up_once_per_event(self):
         wanted = ("person", "package")
         self.assertEqual(self._handle([], wanted=wanted), [])
-        self.assertEqual(self._handle(["person"], wanted=wanted), [("cam1", "Doorbell", 45, "person")])
+        self.assertEqual(self._handle(["person"], wanted=wanted), [("cam1", "Doorbell", 45, "person", "person-chime")])
         self.assertEqual(self._handle(["person"], wanted=wanted), [])
         self.assertEqual(self._handle(["person", "package"], wanted=wanted),
-                         [("cam1", "Doorbell", 45, "package")])
+                         [("cam1", "Doorbell", 45, "package", "package-chime")])
 
     def test_push_builds_alert(self):
         import asyncio
@@ -2073,13 +2074,13 @@ class RingAlertTests(TestCase):
         with patch.dict(sys.modules, {"bdh_sdk.alerts": fake}), \
                 patch("bdh_sdk.alerts", fake, create=True):
             asyncio.run(ev_mod._push_popup("cam1", "Front", 45))
-            asyncio.run(ev_mod._push_popup("cam1", "Front", 45, "vehicle"))
+            asyncio.run(ev_mod._push_popup("cam1", "Front", 45, "vehicle", "none"))
         self.assertEqual([c.args[0] for c in fake.push.call_args_list], [{
             "app": "cameras", "key": "doorbell:cam1", "title": "Someone's at the door (Front)",
-            "embed_url": "/cameras/popup/cam1/", "ttl": 45,
+            "embed_url": "/cameras/popup/cam1/", "ttl": 45, "sound": None,
         }, {
             "app": "cameras", "key": "doorbell:cam1", "title": "Vehicle at Front",
-            "embed_url": "/cameras/popup/cam1/", "ttl": 45,
+            "embed_url": "/cameras/popup/cam1/", "ttl": 45, "sound": "none",
         }])
 
 
@@ -2282,6 +2283,18 @@ class EventPopupConfigTests(TestCase):
             "triggers": [{"entity_id": "lock.front", "to": "unlocked"}, {"entity_id": "event.ring"}]}}})
         self.assertEqual(popups_mod.clean("junk"), {"enabled": True, "cameras": {}})
 
+    def test_clean_keeps_only_non_default_sounds(self):
+        cfg = popups_mod.clean({"cameras": {"cam1": {
+            "kinds": ["doorbell", "person", "vehicle"],
+            "sounds": {"doorbell": "ding-dong", "person": "none", "vehicle": "bogus", "animal": "kalimba"},
+            "triggers": [{"entity_id": "lock.front", "sound": "westminster"},
+                         {"entity_id": "event.ring", "sound": "knock-knock"},
+                         {"entity_id": "binary_sensor.gate", "sound": "/x.mp3"}]}}})
+        self.assertEqual(cfg["cameras"]["cam1"], {
+            "kinds": ["doorbell", "person", "vehicle"], "sounds": {"person": "none"},
+            "triggers": [{"entity_id": "lock.front", "sound": "westminster"},
+                         {"entity_id": "event.ring"}, {"entity_id": "binary_sensor.gate"}]})
+
     def test_title_for(self):
         self.assertEqual(popups_mod.title_for({"entity_id": "lock.front", "new": "unlocked",
                                                "attributes": {"friendly_name": "Front lock"}}, "Cam"),
@@ -2325,15 +2338,21 @@ class PopupStoredConfigTests(TestCase):
     def test_saved_triggers_pop_up_their_camera(self):
         popups_mod.start()
         popups_mod.save({"cameras": {
-            "cam2": {"kinds": ["vehicle"], "triggers": [{"entity_id": "lock.gate"}]}}})
+            "cam2": {"kinds": ["vehicle"], "sounds": {"vehicle": "kalimba"},
+                     "triggers": [{"entity_id": "lock.gate"}, {"entity_id": "lock.shed", "sound": "none"}]}}})
         self.assertEqual(popups_mod.camera_kinds("cam2"), ["vehicle"])
         self.assertEqual(popups_mod.camera_kinds("cam1"), [])
+        self.assertEqual(popups_mod.camera_sound("cam2", "vehicle"), "kalimba")
+        self.assertEqual(popups_mod.camera_sound("cam1", "person"), "notify")
         self.events.publish("ha/state/lock.gate", {"entity_id": "lock.gate", "old": "locked", "new": "unlocked",
                                                    "attributes": {"friendly_name": "Gate"}})
         self.events.publish("ha/state/lock.gate", {"entity_id": "lock.gate", "old": "unlocked", "new": "locked"})
+        self.events.publish("ha/state/lock.shed", {"entity_id": "lock.shed", "old": "locked", "new": "unlocked",
+                                                   "attributes": {"friendly_name": "Shed"}})
         self.events.flush(5)
-        self.assertEqual([(a.as_dict()["key"], a.as_dict()["title"]) for a in self.pushed],
-                         [("doorbell:cam2", "Gate unlocked")])
+        self.assertEqual([(a.as_dict()["key"], a.as_dict()["title"], a.as_dict()["sound"]) for a in self.pushed],
+                         [("doorbell:cam2", "Gate unlocked", "knock-knock"),
+                          ("doorbell:cam2", "Shed unlocked", "none")])
 
     def test_master_switch_off(self):
         popups_mod.start()

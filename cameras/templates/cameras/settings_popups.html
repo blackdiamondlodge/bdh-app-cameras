@@ -7,14 +7,26 @@
     .cp-cam { display: block; }
     .cp-cam .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
     .cp-cam .top .lbl { flex: 1; min-width: 160px; }
-    .cp-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-    .cp-chip { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--mut); border-radius: 999px; padding: 7px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
-    .cp-chip.on { border-color: var(--acc); background: rgba(91,164,230,.16); color: #eef3fa; }
-    .cp-chip:focus-visible, .cp-trig:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
-    .cp-also { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .cp-also > small { color: var(--mut); font-size: 13.5px; margin-right: 4px; }
-    .cp-trig { display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 7px 12px 7px 14px; font-size: 14px; background: rgba(255,255,255,.04); color: inherit; font-family: inherit; text-align: left; cursor: pointer; max-width: 100%; }
-    .cp-trig:hover { border-color: var(--acc); }
+    .cp-tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .cp-tile { flex: 1 1 140px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.04); color: var(--mut); cursor: pointer; }
+    .cp-tile.on { border-color: var(--acc); background: rgba(91,164,230,.13); color: #eef3fa; }
+    .cp-tile > button { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; font-family: inherit; font-size: 15px; font-weight: 500; padding: 10px 12px 0; text-align: left; cursor: pointer; border-radius: 14px 14px 0 0; }
+    .cp-ck { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line); display: grid; place-items: center; font-size: 12px; flex: none; box-sizing: border-box; }
+    .cp-tile.on .cp-ck { background: var(--acc); border-color: var(--acc); color: #fff; }
+    .cp-tile .off { margin: 8px 12px 10px; font-size: 13px; }
+    .cp-snd { display: flex; align-items: center; gap: 6px; margin: 8px 12px 10px; padding-top: 8px; border-top: 1px solid rgba(91,164,230,.3); cursor: default; }
+    .cp-snd > span { font-size: 13px; flex: none; }
+    .cp-snd select { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--acc2); font-family: inherit; font-size: 13.5px; padding: 2px 0; cursor: pointer; }
+    .cp-snd select option { background: var(--card); color: #eef3fa; }
+    .cp-play { width: 28px; height: 28px; border-radius: 50%; border: 0; background: rgba(91,164,230,.25); color: #eef3fa; font-size: 11px; cursor: pointer; flex: none; display: grid; place-items: center; padding: 0; }
+    .cp-play:disabled { opacity: .3; cursor: default; }
+    .cp-tile > button:focus-visible, .cp-trig:focus-visible, .cp-snd select:focus-visible, .cp-play:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+    .cp-also { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .cp-also > small { color: var(--mut); font-size: 13.5px; margin: 9px 4px 0 0; }
+    .cp-tcard { display: inline-flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.04); max-width: 100%; }
+    .cp-tcard:hover { border-color: var(--acc); }
+    .cp-tcard .cp-snd { margin: 0 12px 8px 14px; padding-top: 6px; border-top-color: var(--line); }
+    .cp-trig { display: flex; align-items: center; gap: 10px; border: 0; border-radius: 14px 14px 0 0; padding: 7px 12px 6px 14px; font-size: 14px; background: transparent; color: inherit; font-family: inherit; text-align: left; cursor: pointer; max-width: 100%; }
     .cp-trig span { min-width: 0; }
     .cp-trig em { font-style: normal; color: var(--acc2); }
     .cp-trig small { display: block; color: var(--mut); font-size: 12.5px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -122,6 +134,27 @@
     const domainOf = id => id.split('.')[0];
     const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 
+    // ---- chimes (the hub's chimes.js plays them) ----
+    const Chimes = window.BDHChimes;
+    const chimeLabel = {};
+    (Chimes ? Chimes.list : []).forEach(c => { chimeLabel[c.id] = c.label; });
+    const nice = id => chimeLabel[id] || id.replace(/-/g, ' ').replace(/^./, s => s.toUpperCase());
+    // A sound line: chime dropdown + preview. ``get``/``set`` read and store the choice;
+    // storing the default removes it so the config only keeps real changes.
+    function soundLine(label, dflt, get, set) {
+        const sel = el('select', {ariaLabel: label + ' sound'});
+        page.chimes.forEach(id => sel.append(el('option', {value: id, textContent: nice(id) + (id === dflt ? ' (default)' : '')})));
+        sel.append(el('option', {value: page.silent, textContent: 'Silent'}));
+        sel.value = get() || dflt;
+        const icon = el('span', {ariaHidden: 'true'});
+        const play = el('button', {type: 'button', className: 'cp-play', textContent: '▶', ariaLabel: 'Play ' + label + ' sound', hidden: !Chimes});
+        const sync = () => { const mute = sel.value === page.silent; icon.textContent = mute ? '🔕' : '🔔'; play.disabled = mute; };
+        sel.addEventListener('change', () => { set(sel.value === dflt ? null : sel.value); sync(); save(); if (Chimes) Chimes.play(sel.value); });
+        play.addEventListener('click', () => Chimes.play(sel.value));
+        sync();
+        return el('div', {className: 'cp-snd'}, icon, sel, play);
+    }
+
     // What the entity does to fire the pop-up, e.g. "opens", "turns on", "unlocks".
     function verb(entityId, to) {
         const e = byId[entityId], d = domainOf(entityId);
@@ -171,20 +204,35 @@
     function renderCam(cam) {
         const c = camCfg(cam.id);
         const row = el('div', {className: 'hst-row cp-cam'});
-        const chips = el('div', {className: 'cp-chips', role: 'group', ariaLabel: cam.name + ' detections'});
+        const tiles = el('div', {className: 'cp-tiles', role: 'group', ariaLabel: cam.name + ' detections'});
         page.kinds.filter(k => k !== 'doorbell' || cam.doorbell).forEach(k => {
-            const b = el('button', {type: 'button', className: 'cp-chip', textContent: KIND_LABEL[k]});
-            const sync = () => { const on = c.kinds.includes(k); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); };
-            b.addEventListener('click', () => {
+            const tile = el('div', {className: 'cp-tile'});
+            const ck = el('span', {className: 'cp-ck', ariaHidden: 'true'});
+            const head = el('button', {type: 'button'}, el('span', {textContent: KIND_LABEL[k]}), ck);
+            const body = el('div');
+            const sync = () => {
+                const on = c.kinds.includes(k);
+                tile.classList.toggle('on', on);
+                head.setAttribute('aria-pressed', on);
+                ck.textContent = on ? '✓' : '';
+                body.replaceChildren(on
+                    ? soundLine(KIND_LABEL[k], page.kind_sounds[k], () => (c.sounds || {})[k],
+                        v => { c.sounds = c.sounds || {}; if (v) c.sounds[k] = v; else delete c.sounds[k]; })
+                    : el('div', {className: 'off', textContent: 'Off'}));
+            };
+            // The whole tile toggles, except its sound line.
+            tile.addEventListener('click', ev => {
+                if (ev.target.closest('.cp-snd')) return;
                 c.kinds = c.kinds.includes(k) ? c.kinds.filter(x => x !== k) : page.kinds.filter(x => x === k || c.kinds.includes(x));
                 sync(); save();
             });
-            sync(); chips.append(b);
+            tile.append(head, body);
+            sync(); tiles.append(tile);
         });
         row.append(el('div', {className: 'top'},
             el('div', {className: 'lbl'}, el('b', {textContent: cam.name}),
-               el('small', {textContent: cam.doorbell ? 'Doorbell · pops up when it detects' : 'Pops up when it detects'})),
-            chips));
+               el('small', {textContent: cam.doorbell ? 'Doorbell · pops up when it detects' : 'Pops up when it detects'}))),
+            tiles);
         const also = el('div', {className: 'cp-also'}, el('small', {textContent: 'Also pop up when'}));
         c.triggers.forEach((t, i) => {
             const e = byId[t.entity_id] || stub(t.entity_id), v = verb(t.entity_id, t.to);
@@ -193,7 +241,8 @@
                    el('small', {textContent: where(e) || t.entity_id})),
                 el('i', {textContent: '✎', ariaHidden: 'true'}));
             b.addEventListener('click', () => openPicker(cam, i));
-            also.append(b);
+            also.append(el('div', {className: 'cp-tcard'}, b,
+                soundLine(e.name, page.trigger_sound, () => t.sound, s => { if (s) t.sound = s; else delete t.sound; })));
         });
         const add = el('button', {type: 'button', className: 'cp-add', textContent: '+ Add'});
         add.addEventListener('click', () => openPicker(cam, null));
@@ -394,6 +443,7 @@
         const to = toInput ? toInput.value.trim() : '';
         const t = to ? {entity_id: picked.id, to} : {entity_id: picked.id};
         const trigs = camCfg(pickCam.id).triggers;
+        if (editIdx !== null && trigs[editIdx].sound) t.sound = trigs[editIdx].sound;
         const dup = trigs.some((x, i) => i !== editIdx && x.entity_id === t.entity_id && (x.to || '') === to);
         if (editIdx === null) { if (!dup) trigs.push(t); }
         else if (dup) trigs.splice(editIdx, 1);

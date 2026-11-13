@@ -8,12 +8,18 @@ Admins choose these on the Pop-ups settings page, which saves app state
     {"enabled": true,
      "cameras": {"<camera_id>": {
          "kinds": ["doorbell", "person"],
+         "sounds": {"person": "none"},
          "triggers": [{"entity_id": "binary_sensor.front_door"},
-                      {"entity_id": "lock.front_door", "to": "unlocked"}]}}}
+                      {"entity_id": "lock.front_door", "to": "unlocked", "sound": "westminster"}]}}}
 
 A trigger without ``to`` fires on its domain's usual "something happened":
 a binary sensor turning on, a lock unlocking, a new ``event.*`` event, or any
 other state change.
+
+Each pop-up plays a hub chime (``bdh_sdk.alerts.CHIMES``, or ``"none"``).
+Only choices that differ from the defaults are stored: ``sounds`` per
+detection kind (see :func:`kind_sound`) and ``sound`` per trigger
+(``TRIGGER_SOUND``).
 
 Until that page is saved the old settings apply: a ring pops up its doorbell
 camera when ``doorbell_popup`` is on, and when ``event_popup`` is on each topic
@@ -40,6 +46,16 @@ STATE_KEY = "popups"
 # State a trigger fires on when it has no ``to``; other domains fire on any change.
 DEFAULT_TO = {"binary_sensor": "on", "lock": "unlocked"}
 
+try:
+    from bdh_sdk.alerts import CHIMES, SILENT
+except ImportError:  # bdh-sdk < 0.17
+    CHIMES = ("ding-dong", "soft-bell", "rising-trio", "notify", "westminster", "glass-ping", "low-pulse",
+              "knock-knock", "ding-dong-ding", "harp-sweep", "kalimba", "single-ding")
+    SILENT = "none"
+KIND_SOUNDS = {"doorbell": "ding-dong", "person": "notify"}
+OTHER_KIND_SOUND = "single-ding"
+TRIGGER_SOUND = "knock-knock"
+
 _OPENINGS = {"door", "garage_door", "opening", "window"}
 _NO_STATE = {None, "", "unavailable", "unknown"}
 _ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -62,6 +78,18 @@ def popup_map():
     return {str(topic): str(name) for topic, name in raw.items() if name}
 
 
+def kind_sound(kind):
+    """The default chime for a Protect detection kind."""
+    return KIND_SOUNDS.get(kind, OTHER_KIND_SOUND)
+
+
+def _sound(value, default):
+    """``value`` if it's a valid choice other than ``default``, else None (use the default)."""
+    if value in CHIMES or value == SILENT:
+        return None if value == default else value
+    return None
+
+
 def clean(raw):
     """A valid pop-up config from ``raw`` (e.g. a settings page POST); bad parts are dropped."""
     raw = raw if isinstance(raw, dict) else {}
@@ -81,8 +109,16 @@ def clean(raw):
             if (entity_id, to) in seen:
                 continue
             seen.add((entity_id, to))
-            triggers.append({"entity_id": entity_id, "to": to} if to else {"entity_id": entity_id})
+            out = {"entity_id": entity_id, "to": to} if to else {"entity_id": entity_id}
+            sound = _sound(trig.get("sound"), TRIGGER_SOUND)
+            if sound:
+                out["sound"] = sound
+            triggers.append(out)
         entry = {"kinds": [k for k in POPUP_KINDS if k in kinds], "triggers": triggers}
+        given = cam.get("sounds") if isinstance(cam.get("sounds"), dict) else {}
+        sounds = {k: s for k in entry["kinds"] if (s := _sound(given.get(k), kind_sound(k)))}
+        if sounds:
+            entry["sounds"] = sounds
         if entry["kinds"] or entry["triggers"]:
             cameras[camera_id] = entry
     return {"enabled": raw.get("enabled", True) is not False, "cameras": cameras}
@@ -143,6 +179,13 @@ def camera_kinds(camera_id):
     if not cfg["enabled"]:
         return []
     return cfg["cameras"].get(camera_id, {}).get("kinds", [])
+
+
+def camera_sound(camera_id, kind):
+    """The chime ``camera_id`` plays when it pops up for ``kind`` (reads the database)."""
+    cfg = stored()
+    sounds = (cfg["cameras"].get(camera_id, {}).get("sounds", {}) if cfg else {})
+    return sounds.get(kind, kind_sound(kind))
 
 
 def triggered(data):
@@ -218,6 +261,7 @@ def handle(event, trigger=None, camera_id=None, camera_name=None):
             title=title_for(event.data, cam.get("name") or camera_name or ""),
             embed_url=f"/cameras/popup/{cam['camera_id']}/",
             ttl=config.popup_seconds(),
+            sound=(trigger or {}).get("sound", TRIGGER_SOUND),
         ))
     except Exception:
         logger.exception("Event pop-up for %s failed", event.topic)
