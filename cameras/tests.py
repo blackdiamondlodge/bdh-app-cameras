@@ -1456,10 +1456,7 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         if not _go2rtc_available():
             raise unittest.SkipTest('go2rtc not available on localhost:1984')
 
-        from selenium import webdriver
-        from tests.selenium_helpers import get_chrome_options
-
-        cls.driver = webdriver.Chrome(options=get_chrome_options())
+        cls.driver = cls._start_driver()
         cls.driver.implicitly_wait(5)
         cls._register_test_stream()
 
@@ -1468,6 +1465,29 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         if hasattr(cls, 'driver'):
             cls.driver.quit()
         super().tearDownClass()
+
+    @staticmethod
+    def _start_driver(attempts=3):
+        """Start Chrome and check its renderer answers a first navigation.
+
+        A fresh headless Chrome sometimes never answers its first page load
+        ("Timed out receiving message from renderer"), which by default
+        hangs for 300s and fails the test. Start another browser instead.
+        """
+        from selenium import webdriver
+        from selenium.common.exceptions import TimeoutException
+        from tests.selenium_helpers import get_chrome_options
+
+        for attempt in range(attempts):
+            driver = webdriver.Chrome(options=get_chrome_options())
+            driver.set_page_load_timeout(60)
+            try:
+                driver.get('about:blank')
+                return driver
+            except TimeoutException:
+                driver.quit()
+                if attempt == attempts - 1:
+                    raise
 
     @classmethod
     def _register_test_stream(cls):
