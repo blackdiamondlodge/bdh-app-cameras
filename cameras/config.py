@@ -68,6 +68,11 @@ def keep_open():
     return app_setting("cameras", "keep_open", True, cast=as_bool)
 
 
+def video_mode():
+    """go2rtc player mode for live video: ``webrtc/tcp`` (default) or ``webrtc`` (UDP first)."""
+    return "webrtc" if app_setting("cameras", "video_transport", "tcp") == "udp" else "webrtc/tcp"
+
+
 def popup_seconds():
     try:
         return max(10, int(app_setting("cameras", "popup_seconds", 60)))

@@ -62,6 +62,24 @@ camera it names. Once saved, `event_popups` is ignored and can be removed.
 While the cameras page is open the hub screen saver stays off, so the cameras stay on screen.
 Turn this off with the "Leave cameras open when idle" setting (`keep_open`).
 
+## Live video transport
+
+"Advanced: live video transport" (`video_transport`) applies to every stream on every site,
+including pop-ups:
+
+- **TCP** (default, go2rtc mode `webrtc/tcp`): lost packets are resent by TCP, so a lossy Wi-Fi
+  or busy link slows video down instead of freezing it.
+- **UDP** (`webrtc`): lower latency, falls back to TCP if UDP can't connect. go2rtc 1.9.15 never
+  answers the browser's NACKs (it doesn't read RTCP from its senders), so every lost UDP packet
+  breaks a frame until the next keyframe.
+
+## Stats overlay
+
+Tap the cameras page with three fingers to show or hide WebRTC stats on every camera: stream
+(low or high res), transport (UDP/TCP), resolution, fps, codec, bitrate, RTT, jitter, packets lost,
+NACKs, PLIs, freezes, dropped frames and decoder. In full screen it shows the stream on screen.
+It updates once a second and draws plain text (no blur), so it doesn't slow the display.
+
 ## Display performance
 
 The hubs run on UniFi Connect displays: Chrome on a weak GPU, decoding up to 9 live WebRTC

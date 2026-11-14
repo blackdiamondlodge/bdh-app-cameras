@@ -535,7 +535,7 @@ class CameraFeedViewWithProtectTests(TestCase):
         self.assertEqual(content.count('class="cam-touch-overlay"'), 2)
         # WebRTC-only first (no MSE warm-up -> no mid-start source swap /
         # black flash), with MSE as the fallback mode.
-        self.assertIn('data-mode="webrtc"', content)
+        self.assertIn('data-mode="webrtc/tcp"', content)
         self.assertIn('data-fallback-mode="mse"', content)
 
     @patch("cameras.views._register_streams_with_go2rtc")
@@ -559,10 +559,49 @@ class CameraFeedViewWithProtectTests(TestCase):
         response = self.client.get("/cameras/")
         content = response.content.decode()
 
-        self.assertIn('data-mode="webrtc"', content)
+        self.assertIn('data-mode="webrtc/tcp"', content)
         self.assertIn('data-fallback-mode="mse"', content)
         self.assertNotIn('data-mode="webrtc,mse', content)
         self.assertIn('function startStream(el, src)', content)
+
+    @patch("cameras.views._register_streams_with_go2rtc")
+    @patch("cameras.views.get_protect_cameras")
+    def test_video_transport_setting(self, mock_cameras, mock_register):
+        """TCP by default; the advanced setting switches every stream to UDP-first."""
+        mock_cameras.return_value = [{
+            'name': 'Test', 'host': '192.168.10.1',
+            'cameras': [
+                {'name': 'Cam', 'stream_name': 'cam',
+                 'rtsp_url': 'rtsps://x', 'rtsp_url_low': 'rtsps://x_low',
+                 'camera_id': 'c1', 'is_ptz': False, 'ptz_presets': 0},
+            ],
+        }]
+        with patch("cameras.config.app_setting", side_effect=lambda app, key, default=None, **kw:
+                   "udp" if key == "video_transport" else default):
+            page = self.client.get("/cameras/").content.decode()
+            popup = self.client.get("/cameras/popup/c1/").content.decode()
+        for html in (page, popup):
+            self.assertIn('data-mode="webrtc"', html)
+            self.assertNotIn('webrtc/tcp', html)
+        # Fullscreen high-res copies the tile's mode instead of hard-coding one
+        self.assertIn('hi.dataset.mode = low.dataset.mode', page)
+
+    @patch("cameras.views._register_streams_with_go2rtc")
+    @patch("cameras.views.get_protect_cameras")
+    def test_stats_overlay_per_card(self, mock_cameras, mock_register):
+        """Each card has its own stats box, toggled by a three-finger tap."""
+        mock_cameras.return_value = [{
+            'name': 'Test', 'host': '192.168.10.1',
+            'cameras': [
+                {'name': n, 'stream_name': n.lower(),
+                 'rtsp_url': 'rtsps://x', 'rtsp_url_low': 'rtsps://x_low',
+                 'camera_id': n, 'is_ptz': False, 'ptz_presets': 0}
+                for n in ('A', 'B')
+            ],
+        }]
+        html = self.client.get("/cameras/").content.decode()
+        self.assertEqual(html.count('class="cam-stats"'), 2)
+        self.assertIn('e.touches.length === 3', html)
 
     @patch("cameras.views._register_streams_with_go2rtc")
     @patch("cameras.views.get_protect_cameras")
@@ -1569,8 +1608,8 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         for el in elements:
             mode = el.get_attribute('data-mode')
             self.assertEqual(
-                mode, 'webrtc',
-                f"Expected data-mode='webrtc', got '{mode}'",
+                mode, 'webrtc/tcp',
+                f"Expected data-mode='webrtc/tcp', got '{mode}'",
             )
             self.assertEqual(el.get_attribute('data-fallback-mode'), 'mse')
 
@@ -2276,7 +2315,7 @@ class EventTemplateTests(TestCase):
         self.assertEqual(resp["X-Frame-Options"], "SAMEORIGIN")
         self.assertContains(resp, 'data-stream-name="front_door"')
         # WebRTC first (no MSE race -> no black flash), MSE only on failure.
-        self.assertContains(resp, 'data-mode="webrtc"')
+        self.assertContains(resp, 'data-mode="webrtc/tcp"')
         self.assertContains(resp, 'data-fallback-mode="mse"')
         self.assertNotContains(resp, "cam-scrub")
         mock_register.assert_called_once()
