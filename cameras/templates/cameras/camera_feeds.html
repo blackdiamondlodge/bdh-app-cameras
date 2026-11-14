@@ -1809,7 +1809,8 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         const card = document.fullscreenElement;
         const s = scrubbers.get(card);
         if (!s) return;
-        if (s.dragging) { chromeTID = setTimeout(hideChrome, CHROME_IDLE_MS); return; }
+        const paused = s.mode === 'replay' && s.video.paused && !s.video.ended;
+        if (s.dragging || paused) { chromeTID = setTimeout(hideChrome, CHROME_IDLE_MS); return; }
         s.hideCard();
         card.classList.add('chrome-hidden');
     }
@@ -1834,6 +1835,13 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         if (e.pointerType === 'mouse' && scrubbers.has(document.fullscreenElement)) showChrome();
     }, { passive: true });
     document.addEventListener('fullscreenchange', showChrome);
+    // Paused replay keeps the scrubber up; resuming restarts the idle timer.
+    for (const type of ['pause', 'play']) {
+        document.addEventListener(type, e => {
+            const s = scrubbers.get(document.fullscreenElement);
+            if (s && e.target === s.video && !s.video.ended) showChrome();
+        }, true);
+    }
 </script>
 {% endif %}
 {% endblock %}

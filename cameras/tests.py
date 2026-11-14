@@ -1716,8 +1716,8 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
         except Exception:
             self.skipTest("Browser did not enter fullscreen")
 
-        # The critical assertion: the fullscreen stream's WebSocket must
-        # reach OPEN within 5 seconds.  The old bug caused the new WS to
+        # The critical assertion: the fullscreen stream must connect
+        # within 5 seconds.  The old bug caused the new WS to
         # be killed by the stale onclose/video-error handlers, leaving ws
         # null until RECONNECT_TIMEOUT (15s) fired.
         start = time.time()
@@ -1726,14 +1726,17 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
                 const fs = document.fullscreenElement;
                 if (!fs) return false;
                 const el = fs.querySelector('video-stream');
-                if (!el || !el.ws) return false;
-                return el.ws.readyState === WebSocket.OPEN;
+                if (!el) return false;
+                // video-rtc closes and nulls ws once WebRTC wins, so
+                // either transport being up counts as connected.
+                return el.pcState === WebSocket.OPEN ||
+                    (!!el.ws && el.ws.readyState === WebSocket.OPEN);
             """)
         )
         elapsed = time.time() - start
         self.assertTrue(
             ws_open,
-            f"Fullscreen stream WebSocket did not open within 5s "
+            f"Fullscreen stream did not connect within 5s "
             f"(took {elapsed:.1f}s) — safeDisconnect may be broken"
         )
 
@@ -1843,8 +1846,11 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
                 const fs = document.fullscreenElement;
                 if (!fs) return false;
                 const el = fs.querySelector('video-stream');
-                if (!el || !el.ws) return false;
-                return el.ws.readyState === WebSocket.OPEN;
+                if (!el) return false;
+                // video-rtc closes and nulls ws once WebRTC wins, so
+                // either transport being up counts as connected.
+                return el.pcState === WebSocket.OPEN ||
+                    (!!el.ws && el.ws.readyState === WebSocket.OPEN);
             """)
         )
 
@@ -1947,8 +1953,11 @@ class CameraStreamSeleniumTests(StaticLiveServerTestCase):
                 const fs = document.fullscreenElement;
                 if (!fs) return false;
                 const el = fs.querySelector('video-stream');
-                if (!el || !el.ws) return false;
-                return el.ws.readyState === WebSocket.OPEN;
+                if (!el) return false;
+                // video-rtc closes and nulls ws once WebRTC wins, so
+                // either transport being up counts as connected.
+                return el.pcState === WebSocket.OPEN ||
+                    (!!el.ws && el.ws.readyState === WebSocket.OPEN);
             """)
         )
 
