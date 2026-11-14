@@ -90,6 +90,10 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     .cam-card video::-webkit-media-controls { display: none !important; }
     /* go2rtc's built-in "MSE / loading" overlay */
     .cam-card video-stream .info { display: none !important; }
+    /* Fullscreen high-res stream: loads invisibly over the low-res one and is
+       revealed once it plays (high-res keyframes can be 5 s apart). */
+    .cam-card video-stream.cam-hi { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+    .cam-card.hi-live video-stream.cam-hi { opacity: 1; }
 
     /* Bottom shade so labels stay readable over bright snow */
     .cam-card::after {
@@ -181,6 +185,24 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         z-index: 1;
         cursor: pointer;
     }
+
+    /* WebRTC stats, toggled by a three-finger tap. Text only, no blur. */
+    .cam-stats {
+        display: none;
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 3;
+        padding: 6px 9px;
+        border-radius: 6px;
+        background: rgba(0,0,0,.75);
+        color: #9effa8;
+        font: 11px/1.35 ui-monospace, Consolas, monospace;
+        white-space: pre;
+        pointer-events: none;
+    }
+    body.show-stats .cam-stats { display: block; }
+    .cam-card:fullscreen .cam-stats { top: 64px; left: 24px; font-size: 14px; padding: 8px 12px; }
 
     /* PTZ presets: always visible on the hero and in fullscreen (touch kiosk) */
     .ptz-controls {
@@ -491,11 +513,12 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         <video-stream
             data-stream-name="{{ stream.name }}"
             data-has-low="{% if stream.has_low %}true{% else %}false{% endif %}"
-            data-mode="webrtc"
+            data-mode="{{ video_mode }}"
             data-fallback-mode="mse"
             data-site="{{ forloop.parentloop.counter0 }}">
         </video-stream>
         <div class="cam-touch-overlay"></div>
+        <div class="cam-stats"></div>
         {% if stream.is_ptz and stream.ptz_presets > 0 %}
         <div class="ptz-controls">
             {% for i in stream.preset_range %}
@@ -653,13 +676,27 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         if (!card || !v) return;
         v.controls = false;
         v.playsInline = true;
-        card.dataset.state = 'connecting';
+        const hi = el.classList.contains('cam-hi');
+        if (!hi) card.dataset.state = 'connecting';
         if (v.dataset.watched) return;
         v.dataset.watched = 'true';
-        const set = state => { card.dataset.state = state; };
-        v.addEventListener('playing', () => set('live'));
+        // Only the visible stream drives the badge: high-res once revealed,
+        // low-res until then.
+        const set = state => {
+            if (card.classList.contains('hi-live') === hi) card.dataset.state = state;
+        };
+        const live = () => {
+            if (hi) {
+                if (!el.dataset.active) return;
+                el._live = true;
+                revealHigh(el);
+            }
+            set('live');
+        };
+        v.addEventListener('playing', live);
         v.addEventListener('timeupdate', () => {
-            if (card.dataset.state !== 'live' && !v.paused) set('live');
+            if (v.paused) return;
+            if (hi ? !el._live : card.dataset.state !== 'live') live();
         });
         v.addEventListener('waiting', () => set('connecting'));
         // 'emptied' is deliberately not here: it fires on every source swap
@@ -685,6 +722,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     }
 
     const WEBRTC_TIMEOUT = 6000;
+    const HI_TIMEOUT = 10000;
     const RTC_DIAG_URL = '{% url "camera_rtc_diag" %}';
     const pageT0 = Date.now();
 
@@ -724,9 +762,13 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     // Start a stream WebRTC-only (no MSE warm-up, so no mid-start source
     // swap).  If WebRTC isn't playing within WEBRTC_TIMEOUT, or the peer
     // connection gives up, restart the tile on the fallback mode (MSE).
+    // A fullscreen high-res stream instead gets HI_TIMEOUT and, if it fails,
+    // just stops: the low-res stream underneath stays on screen.
     function startStream(el, src) {
         clearTimeout(el._fallbackTID);
         clearInterval(el._fallbackPoll);
+        const hi = el.classList.contains('cam-hi');
+        el._live = false;
         const url = `${GO2RTC_BASE}/api/ws?src=${src}`;
         const fallback = el.dataset.fallbackMode;
         el.background = true;
@@ -737,16 +779,21 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         el.src = url;
         el._streamUrl = url;
         el.dataset.active = 'true';
-        if (!fallback || fallback === el.mode) return;
+        if (!hi && (!fallback || fallback === el.mode)) return;
 
         const card = el.closest('.cam-card');
-        const isLive = () => card && card.dataset.state === 'live';
+        const isLive = () => hi ? el._live : card && card.dataset.state === 'live';
         const fallBack = reason => {
             clearTimeout(el._fallbackTID);
             clearInterval(el._fallbackPoll);
             if (!el.dataset.active || el._streamUrl !== url || isLive()) return;
-            console.warn(`WebRTC failed for ${src}; falling back to ${fallback}`);
             reportFallback(el, src, reason);
+            if (hi) {
+                console.warn(`High-res ${src} didn't start; staying on low-res`);
+                stopStream(el);
+                return;
+            }
+            console.warn(`WebRTC failed for ${src}; falling back to ${fallback}`);
             safeDisconnect(el);
             // Next tick, so the old socket's close event can't clobber the new one
             setTimeout(() => {
@@ -755,7 +802,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
                 el.src = url;
             }, 0);
         };
-        el._fallbackTID = setTimeout(() => fallBack('timeout'), WEBRTC_TIMEOUT);
+        el._fallbackTID = setTimeout(() => fallBack('timeout'), hi ? HI_TIMEOUT : WEBRTC_TIMEOUT);
         el._fallbackPoll = setInterval(() => {
             if (isLive() || !el.dataset.active) {
                 clearTimeout(el._fallbackTID);
@@ -769,14 +816,12 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         }, 500);
     }
 
+    const lowSrc = el => el.dataset.hasLow === 'true' ? `${el.dataset.streamName}_low` : el.dataset.streamName;
+
     // Initialize video-stream elements for a panel (low quality for grid)
     function initStreams(panel) {
-        panel.querySelectorAll('video-stream').forEach(el => {
-            if (!el.dataset.active) {
-                const streamName = el.dataset.streamName;
-                const hasLow = el.dataset.hasLow === 'true';
-                startStream(el, hasLow ? `${streamName}_low` : streamName);
-            }
+        panel.querySelectorAll('video-stream:not(.cam-hi)').forEach(el => {
+            if (!el.dataset.active) startStream(el, lowSrc(el));
         });
     }
 
@@ -793,29 +838,139 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         panel.querySelectorAll('video-stream').forEach(stopStream);
     }
 
+    // Fullscreen keeps the tile's low-res stream on screen and loads the
+    // high-res one in a second, invisible <video-stream> on top.  High-res
+    // keyframes can be 5 s apart, so it may take that long to show a frame.
+    function hiStream(card) {
+        let hi = card.querySelector('video-stream.cam-hi');
+        if (!hi) {
+            hi = document.createElement('video-stream');
+            hi.className = 'cam-hi';
+            const low = card.querySelector('video-stream');
+            hi.dataset.mode = low.dataset.mode;
+            low.after(hi);
+        }
+        return hi;
+    }
+
+    function startFullscreen(card) {
+        const low = card.querySelector('video-stream:not(.cam-hi)');
+        if (!low) return;
+        const hi = card.querySelector('video-stream.cam-hi');
+        if (hi && hi.dataset.active) return;
+        if (!low.dataset.active) {
+            card.classList.remove('hi-live');
+            startStream(low, lowSrc(low));
+        }
+        if (low.dataset.hasLow === 'true') startStream(hiStream(card), low.dataset.streamName);
+    }
+
+    // High-res is playing: show it and drop the low-res stream underneath.
+    function revealHigh(hi) {
+        const card = hi.closest('.cam-card');
+        if (document.fullscreenElement !== card || card.classList.contains('hi-live')) return;
+        card.classList.add('hi-live');
+        stopStream(card.querySelector('video-stream:not(.cam-hi)'));
+    }
+
+    function stopCard(card) {
+        card.classList.remove('hi-live');
+        card.querySelectorAll('video-stream').forEach(stopStream);
+    }
+
     // The scrubber fires cam:live when the fullscreen player leaves/returns to
     // live.  Away from live, pause the hidden stream, then drop it after a few
     // seconds (a paused WebRTC <video> keeps receiving and decoding); a quick
     // replay-and-back resumes instantly instead of reconnecting.
     const LIVE_DROP_MS = 3000;
     document.querySelectorAll('.cam-card').forEach(card => {
-        const el = card.querySelector('video-stream');
-        if (!el) return;
+        if (!card.querySelector('video-stream')) return;
+        const active = () => [...card.querySelectorAll('video-stream')].filter(s => s.dataset.active);
         card.addEventListener('cam:live', e => {
-            clearTimeout(el._liveDropTID);
+            clearTimeout(card._liveDropTID);
             const fs = () => document.fullscreenElement === card;
             if (!e.detail) {
-                if (el.video) el.video.pause();
-                el._liveDropTID = setTimeout(() => { if (fs()) stopStream(el); }, LIVE_DROP_MS);
+                active().forEach(s => s.video && s.video.pause());
+                card._liveDropTID = setTimeout(() => { if (fs()) stopCard(card); }, LIVE_DROP_MS);
             } else if (fs()) {
-                if (el.dataset.active) {
-                    if (el.video) el.video.play().catch(() => {});
-                } else {
-                    setTimeout(() => startStream(el, el.dataset.streamName), 0);
-                }
+                active().forEach(s => s.video && s.video.play().catch(() => {}));
+                // Restarts whatever was dropped (or high-res that timed out)
+                setTimeout(() => startFullscreen(card), 0);
             }
         });
     });
+
+    // Three-finger tap toggles a stats overlay on every camera (hidden
+    // diagnostics).  Each card shows the stream it's displaying: high-res
+    // once revealed in fullscreen, otherwise its low-res tile stream.
+    const STATS_MS = 1000;
+    let statsTID = 0;
+    const fmt = (n, d = 0) => n == null || isNaN(n) ? '–' : Number(n).toFixed(d);
+
+    async function cardStats(card) {
+        const box = card.querySelector('.cam-stats');
+        const hi = card.querySelector('video-stream.cam-hi');
+        const el = hi && card.classList.contains('hi-live') ? hi
+                 : card.querySelector('video-stream:not(.cam-hi)');
+        if (!box || !el) return;
+        const head = `${card.dataset.name} · ${el === hi ? 'HIGH' : 'LOW'}`;
+        if (!el.dataset.active) { box.textContent = `${head}\nstopped`; return; }
+        const v = el.video;
+        const size = v && v.videoWidth ? `${v.videoWidth}×${v.videoHeight}` : '';
+        if (!el.pc) { box.textContent = `${head} · ${(el.mode || '').toUpperCase()}\n${size}`; return; }
+        const stats = await el.pc.getStats();
+        let rtp, pair, codec;
+        stats.forEach(s => {
+            if (s.type === 'inbound-rtp' && s.kind === 'video') rtp = s;
+            else if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+        });
+        if (!pair) stats.forEach(s => { if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s; });
+        const local = pair && stats.get(pair.localCandidateId);
+        const proto = local ? (local.relayProtocol || local.protocol || '').toUpperCase() : '?';
+        if (rtp && rtp.codecId) codec = stats.get(rtp.codecId);
+        const lines = [`${head} · WebRTC/${proto}${local ? ' ' + local.candidateType : ''}`];
+        if (!rtp) {
+            lines.push(`pc ${el.pc.connectionState} · ice ${el.pc.iceConnectionState}`);
+        } else {
+            const prev = el._statsPrev;
+            const now = { t: rtp.timestamp, bytes: rtp.bytesReceived, recv: rtp.packetsReceived, lost: rtp.packetsLost };
+            el._statsPrev = now;
+            let kbps, lossPct;
+            if (prev && now.t > prev.t && now.bytes >= prev.bytes) {
+                kbps = (now.bytes - prev.bytes) * 8 / (now.t - prev.t);
+                const got = now.recv - prev.recv, lost = now.lost - prev.lost;
+                lossPct = got + lost > 0 ? 100 * lost / (got + lost) : 0;
+            }
+            const w = rtp.frameWidth ? `${rtp.frameWidth}×${rtp.frameHeight}` : size;
+            lines.push(`${w}  ${fmt(rtp.framesPerSecond)} fps  ${codec ? codec.mimeType.split('/')[1] : ''}`);
+            lines.push(`${fmt(kbps / 1000, 1)} Mb/s  RTT ${fmt(pair && pair.currentRoundTripTime * 1000)} ms  jitter ${fmt(rtp.jitter * 1000)} ms`);
+            lines.push(`lost ${rtp.packetsLost} (${fmt(lossPct, 1)}%)  NACK ${rtp.nackCount ?? '–'}  PLI ${rtp.pliCount ?? '–'}`);
+            lines.push(`freezes ${rtp.freezeCount ?? '–'}  dropped ${rtp.framesDropped ?? '–'}  decoded ${rtp.framesDecoded ?? '–'}`);
+            if (rtp.decoderImplementation) lines.push(`decoder ${rtp.decoderImplementation}`);
+        }
+        box.textContent = lines.join('\n');
+    }
+
+    function refreshStats() {
+        const fs = document.fullscreenElement;
+        const cards = fs ? [fs] : document.querySelectorAll('.site-panel.active .cam-card');
+        cards.forEach(card => cardStats(card).catch(() => {}));
+    }
+
+    function toggleStats() {
+        const on = document.body.classList.toggle('show-stats');
+        clearInterval(statsTID);
+        statsTID = 0;
+        if (on) {
+            refreshStats();
+            statsTID = setInterval(refreshStats, STATS_MS);
+        }
+    }
+
+    // Capture phase, so it also works over fullscreen buttons and the scrubber.
+    document.addEventListener('touchstart', e => {
+        if (e.touches.length === 3) toggleStats();
+    }, { capture: true, passive: true });
 
     // Wait for video-stream.js to load before initializing
     go2rtcReady.then(() => {
@@ -888,14 +1043,15 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         if (exitingAll && document.fullscreenElement) return;
 
         if (document.fullscreenElement) {
-            // Entering fullscreen — switch this stream to high-res, stop others
+            // Entering fullscreen — stop every other tile (the display's GPU
+            // can't decode the grid behind fullscreen), keep this tile's
+            // low-res stream playing and load high-res behind it.
             const fsCard = document.fullscreenElement;
-            const fsStream = fsCard.querySelector('video-stream');
+            activePanel.querySelectorAll('.cam-card').forEach(card => {
+                if (card !== fsCard) stopCard(card);
+            });
 
-            // Stop ALL streams first (closes their WebSocket connections)
-            stopStreams(activePanel);
-
-            // Start the fullscreen stream at high quality after a tick.
+            // Start new connections after a tick.
             // go2rtc's VideoRTC.onclose() handler fires asynchronously when
             // a WebSocket closes.  If we create a new connection in the same
             // synchronous block, onclose() sees wsState=CONNECTING (not CLOSED)
@@ -903,13 +1059,11 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             // leaving a dangling PeerConnection ("pending" RTC).  Deferring
             // the new connection lets the close event fire while wsState is
             // still CLOSED, so onclose() exits harmlessly.
-            if (fsStream) {
-                setTimeout(() => startStream(fsStream, fsStream.dataset.streamName), 0);
-            }
+            setTimeout(() => startFullscreen(fsCard), 0);
         } else {
             // Exiting fullscreen — restart everything at low quality.
             // Same race-avoidance pattern: stop first, restart after a tick.
-            stopStreams(activePanel);
+            activePanel.querySelectorAll('.cam-card').forEach(stopCard);
             setTimeout(() => initStreams(activePanel), 0);
         }
     });

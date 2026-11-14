@@ -192,6 +192,7 @@ def camera_feed_view(request):
         'is_admin': is_admin(request),
         'event_kinds': config.enabled_event_kinds(),
         'keep_open': config.keep_open(),
+        'video_mode': config.video_mode(),
     })
 
 
@@ -363,6 +364,7 @@ def popup(request, camera_id):
         'stream': camera['stream_name'],
         'name': camera['name'],
         'go2rtc_port': urlparse(config.go2rtc_url()).port or 1984,
+        'video_mode': config.video_mode(),
     })
 
 

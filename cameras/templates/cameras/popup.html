@@ -23,7 +23,7 @@ repainting animations stall WebRTC video decode. See README "Display performance
 </style>
 </head>
 <body data-state="connecting">
-<video-stream data-stream-name="{{ stream }}" data-mode="webrtc" data-fallback-mode="mse"></video-stream>
+<video-stream data-stream-name="{{ stream }}" data-mode="{{ video_mode }}" data-fallback-mode="mse"></video-stream>
 <div class="state">LIVE</div>
 <script type="module">
     const base = `http://${window.location.hostname}:{{ go2rtc_port }}`;
