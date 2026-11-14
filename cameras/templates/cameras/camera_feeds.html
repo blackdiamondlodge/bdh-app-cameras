@@ -15,8 +15,10 @@ sits over live video: the blur is recomputed every video frame, and blurred pill
 dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display performance".
 {% endcomment %}
 <style>
+    /* The fallback colour also paints the root canvas, which Chrome shows
+       while switching to fullscreen; without it that frame flashes white. */
     body {
-        background: radial-gradient(ellipse 120% 80% at 50% 0%, #1d3350 0%, #0c1622 55%, #060a10 100%) fixed !important;
+        background: radial-gradient(ellipse 120% 80% at 50% 0%, #1d3350 0%, #0c1622 55%, #060a10 100%) #060a10 fixed !important;
         color: #fff;
         margin: 0;
         overflow: hidden;
@@ -87,6 +89,14 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         object-fit: cover;
         background: transparent;
     }
+    /* Recent still behind the (transparent until its first frame) video.
+       It's in the markup so the browser fetches it with the page. */
+    .cam-card video-stream { position: relative; }
+    .cam-poster {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; pointer-events: none;
+    }
+    .cam-card:fullscreen .cam-poster { display: none; }
     .cam-card video::-webkit-media-controls { display: none !important; }
     /* go2rtc's built-in "MSE / loading" overlay */
     .cam-card video-stream .info { display: none !important; }
@@ -247,6 +257,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
 
     /* Fullscreen-only chrome */
     .cam-fs-bar { display: none; }
+    .cam-card::backdrop { background: #000; }
     .cam-card:fullscreen {
         background: #000;
         border: 0;
@@ -520,6 +531,10 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
 <div class="camera-grid site-panel{% if forloop.first %} active{% endif %}{% if site.hero %} has-hero{% else %} n{{ site.streams|length }}{% endif %}" data-site="{{ forloop.counter0 }}">
     {% for stream in site.streams %}
     <div class="cam-card{% if site.hero and forloop.first %} hero{% endif %}" data-state="connecting" data-camera-id="{{ stream.camera_id }}" data-name="{{ stream.display_name }}">
+            {% if is_admin and stream.camera_id %}
+            {# Other sites' panels are hidden; lazy defers their stills until shown. #}
+            <img class="cam-poster" alt="" src="{% url 'camera_snapshot' stream.camera_id %}?w=640"{% if not forloop.parentloop.first %} loading="lazy"{% endif %}>
+            {% endif %}
         <video-stream
             data-stream-name="{{ stream.name }}"
             data-has-low="{% if stream.has_low %}true{% else %}false{% endif %}"
@@ -717,20 +732,6 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             }));
     }
 
-    {% if is_admin %}
-    const POSTER_URL = '{% url "camera_snapshot" "CAMID" %}';
-    {% else %}
-    const POSTER_URL = '';
-    {% endif %}
-
-    // Show a recent still instead of black until the first frame arrives.
-    function setPoster(el) {
-        const card = el.closest('.cam-card');
-        const camId = card && card.dataset.cameraId;
-        if (!POSTER_URL || !camId || !el.video || el.video.poster) return;
-        el.video.poster = POSTER_URL.replace('CAMID', encodeURIComponent(camId)) + '?w=640';
-    }
-
     const WEBRTC_TIMEOUT = 6000;
     const HI_TIMEOUT = 10000;
     const RTC_DIAG_URL = '{% url "camera_rtc_diag" %}';
@@ -784,7 +785,6 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         el.background = true;
         el.mode = el.dataset.mode;
         if (el.video) el.video.muted = true;
-        setPoster(el);
         watchState(el);
         el.src = url;
         el._streamUrl = url;
