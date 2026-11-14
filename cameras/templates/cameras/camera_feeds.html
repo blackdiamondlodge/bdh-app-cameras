@@ -465,7 +465,9 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     .scrub-tick.major { top: 0; height: auto; background: rgba(255,255,255,.45); }
     .scrub-tick span {
         position: absolute; bottom: 4px; left: 4px; font-size: 11px; font-weight: 600; color: #e6edf7; white-space: nowrap;
-        text-shadow: 0 0 3px #000, 0 0 6px #000;
+        /* Stroke, not a blurred text-shadow: blurred shadows over the playing
+           video halved replay frame rate on the Connect display. */
+        -webkit-text-stroke: 3px #000; paint-order: stroke fill;
     }
     .scrub-pop {
         position: absolute; bottom: 150px; width: 280px; margin-left: -140px; border-radius: 10px; overflow: hidden;
@@ -1619,7 +1621,8 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
                     ? `<div class="scrub-tick major" style="left:${this.pct(t)}%"><span>${fmtTime(t)}</span></div>`
                     : `<div class="scrub-tick" style="left:${this.pct(t)}%"></div>`);
             }
-            this.ticks.innerHTML = ticks.join('');
+            const html = ticks.join('');
+            if (html !== this.ticksHtml) this.ticks.innerHTML = this.ticksHtml = html;
             this.renderStrip();
             this.renderMarks();
             const live = this.mode === 'live';
