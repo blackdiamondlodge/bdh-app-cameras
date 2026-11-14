@@ -406,6 +406,14 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     .cam-card:fullscreen .cam-scrub { display: flex; }
     .cam-card:fullscreen .cam-label { bottom: 150px; }
     .cam-card:fullscreen .ptz-controls { bottom: 150px; }
+    /* Idle fullscreen hides the scrubber; visibility (not just opacity) so
+       nothing is painted over the video while it's away. */
+    .cam-card:fullscreen .cam-scrub { transition: opacity .2s, visibility 0s; }
+    .cam-card:fullscreen.chrome-hidden .cam-scrub {
+        opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .2s, visibility 0s .2s;
+    }
+    .cam-card:fullscreen.chrome-hidden .cam-label,
+    .cam-card:fullscreen.chrome-hidden .ptz-controls { bottom: 24px; }
     .cam-card:fullscreen.replaying .cam-replay,
     .cam-card:fullscreen.scrubbing .cam-still { display: block; }
     .cam-replay, .cam-still {
@@ -934,13 +942,20 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         const bytes = res && (res.encodedBodySize || res.transferSize);
         const mbps = bytes && v.duration ? bytes * 8 / v.duration / 1e6 : null;
         const live = document.querySelectorAll('video-stream[data-active]').length;
-        const playing = [...document.querySelectorAll('video')].filter(x => !x.paused && !x.ended && x.readyState > 2).length;
+        // A stopped stream's <video> still reports playing (its srcObject is
+        // left attached), so count only videos that decoded since last tick.
+        let decoding = 0;
+        document.querySelectorAll('video').forEach(x => {
+            const n = x.getVideoPlaybackQuality ? x.getVideoPlaybackQuality().totalVideoFrames : 0;
+            if (x._statsFrames !== undefined && n > x._statsFrames) decoding++;
+            x._statsFrames = n;
+        });
         box.textContent = [
             `${head} · ${v.paused ? 'paused' : 'playing'}`,
             `${v.videoWidth}×${v.videoHeight}  ${fmt(fps)} fps  ${fmt(mbps, 1)} Mb/s`,
             `dropped ${q ? q.droppedVideoFrames : '–'} (${fmt(dropFps, 1)}/s)  decoded ${q ? q.totalVideoFrames : '–'}`,
             `buffer ${fmt(ahead, 1)} s  clip ${fmt(bytes / 1e6, 1)} MB / ${fmt(v.duration)} s`,
-            `page: ${live} live streams, ${playing} videos playing`,
+            `page: ${live} live streams, ${decoding} videos decoding`,
         ].join('\n');
     }
 
@@ -1777,6 +1792,48 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         const s = scrubbers.get(document.fullscreenElement);
         if (s && !s.dragging) s.render();
     }, 5000);
+
+    // Fullscreen hides the scrubber after CHROME_IDLE_MS without a touch.
+    // While it's hidden, the first touch only brings it back (so a tap on the
+    // video doesn't also exit fullscreen), unless it lands on a button, which
+    // acts as usual.
+    const CHROME_IDLE_MS = 5000;
+    let chromeTID = 0;
+    let swallowClick = false;
+    function showChrome() {
+        clearTimeout(chromeTID);
+        document.querySelectorAll('.cam-card.chrome-hidden').forEach(c => c.classList.remove('chrome-hidden'));
+        if (scrubbers.has(document.fullscreenElement)) chromeTID = setTimeout(hideChrome, CHROME_IDLE_MS);
+    }
+    function hideChrome() {
+        const card = document.fullscreenElement;
+        const s = scrubbers.get(card);
+        if (!s) return;
+        if (s.dragging) { chromeTID = setTimeout(hideChrome, CHROME_IDLE_MS); return; }
+        s.hideCard();
+        card.classList.add('chrome-hidden');
+    }
+    document.addEventListener('pointerdown', e => {
+        swallowClick = false;
+        const card = document.fullscreenElement;
+        if (!scrubbers.has(card)) return;
+        if (card.classList.contains('chrome-hidden') && !e.target.closest('button')) {
+            e.stopPropagation();
+            e.preventDefault();
+            swallowClick = true;
+        }
+        showChrome();
+    }, true);
+    document.addEventListener('click', e => {
+        if (!swallowClick) return;
+        swallowClick = false;
+        e.stopPropagation();
+        e.preventDefault();
+    }, true);
+    document.addEventListener('pointermove', e => {
+        if (e.pointerType === 'mouse' && scrubbers.has(document.fullscreenElement)) showChrome();
+    }, { passive: true });
+    document.addEventListener('fullscreenchange', showChrome);
 </script>
 {% endif %}
 {% endblock %}
