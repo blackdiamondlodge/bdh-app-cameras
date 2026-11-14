@@ -2303,6 +2303,7 @@ class EventTemplateTests(TestCase):
         self.assertIn('data-camera-id="cam1"', html)
         self.assertNotIn('ev-rail', html)
         self.assertNotIn('cam-scrub', html)
+        self.assertNotIn('<img class="cam-poster"', html)
 
     @patch("cameras.views._register_streams_with_go2rtc")
     @patch("cameras.views.get_protect_cameras")
@@ -2310,6 +2311,8 @@ class EventTemplateTests(TestCase):
         mock_cameras.return_value = self.CAMS
         with patch("cameras.views.is_admin", return_value=True):
             html = Client().get("/cameras/").content.decode()
+        # First (visible) site's stills load eagerly with the page
+        self.assertIn('<img class="cam-poster" alt="" src="/cameras/snapshot/cam1/?w=640">', html)
         self.assertIn('class="ev-rail"', html)
         self.assertIn('class="cam-scrub"', html)
         self.assertIn('data-kind="person"', html)
