@@ -907,8 +907,44 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     let statsTID = 0;
     const fmt = (n, d = 0) => n == null || isNaN(n) ? '–' : Number(n).toFixed(d);
 
+    // Replay plays MP4 chunks in a plain <video>, so there are no WebRTC
+    // stats; report decode quality from getVideoPlaybackQuality() instead.
+    function replayStats(card, box) {
+        const v = card.querySelector('video.cam-replay:not(.standby)');
+        const head = `${card.dataset.name} · REPLAY`;
+        if (!v || !v.getAttribute('src')) { box.textContent = `${head}\nloading`; return; }
+        const q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+        const now = { t: performance.now(), src: v.currentSrc,
+                      total: q ? q.totalVideoFrames : null, dropped: q ? q.droppedVideoFrames : null };
+        const prev = v._statsPrev;
+        v._statsPrev = now;
+        let fps, dropFps;
+        if (q && prev && prev.src === now.src && now.t > prev.t && now.total >= prev.total) {
+            const dt = (now.t - prev.t) / 1000;
+            fps = (now.total - now.dropped - (prev.total - prev.dropped)) / dt;
+            dropFps = (now.dropped - prev.dropped) / dt;
+        }
+        let ahead = 0;
+        for (let i = 0; i < v.buffered.length; i++) {
+            if (v.buffered.start(i) <= v.currentTime && v.currentTime <= v.buffered.end(i)) ahead = v.buffered.end(i) - v.currentTime;
+        }
+        const res = performance.getEntriesByName(v.currentSrc).pop();
+        const bytes = res && (res.encodedBodySize || res.transferSize);
+        const mbps = bytes && v.duration ? bytes * 8 / v.duration / 1e6 : null;
+        const live = document.querySelectorAll('video-stream[data-active]').length;
+        const playing = [...document.querySelectorAll('video')].filter(x => !x.paused && !x.ended && x.readyState > 2).length;
+        box.textContent = [
+            `${head} · ${v.paused ? 'paused' : 'playing'}`,
+            `${v.videoWidth}×${v.videoHeight}  ${fmt(fps)} fps  ${fmt(mbps, 1)} Mb/s`,
+            `dropped ${q ? q.droppedVideoFrames : '–'} (${fmt(dropFps, 1)}/s)  decoded ${q ? q.totalVideoFrames : '–'}`,
+            `buffer ${fmt(ahead, 1)} s  clip ${fmt(bytes / 1e6, 1)} MB / ${fmt(v.duration)} s`,
+            `page: ${live} live streams, ${playing} videos playing`,
+        ].join('\n');
+    }
+
     async function cardStats(card) {
         const box = card.querySelector('.cam-stats');
+        if (box && card.classList.contains('replaying')) { replayStats(card, box); return; }
         const hi = card.querySelector('video-stream.cam-hi');
         const el = hi && card.classList.contains('hi-live') ? hi
                  : card.querySelector('video-stream:not(.cam-hi)');
