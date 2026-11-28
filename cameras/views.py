@@ -305,16 +305,23 @@ def _cached_poster(camera_id):
     return None
 
 
+SITE_COOKIE = 'cameras_site'
+
+
+def _site_slug(name):
+    return (name or '').strip().lower().replace(' ', '_').replace('-', '_')
+
+
 def _requested_site(value, sites):
     """Index of the tab to open for ?site=, by name ("mercer_island") or index.
 
     Unknown sites (or ones with no cameras guests may see) open the first tab.
     """
-    value = (value or '').strip().lower().replace(' ', '_').replace('-', '_')
+    value = _site_slug(value)
     if value.isdigit():
         return int(value) if int(value) < len(sites) else 0
     for i, site in enumerate(sites):
-        if site['name'].lower().replace(' ', '_').replace('-', '_') == value:
+        if _site_slug(site['name']) == value:
             return i
     return 0
 
@@ -378,7 +385,9 @@ def camera_feed_view(request):
         streams, hero = _with_hero(get_go2rtc_streams(go2rtc_url))
         sites = [{'name': 'Cameras', 'streams': streams, 'hero': hero}]
 
-    active_site = _requested_site(request.GET.get('site'), sites)
+    # ?site= wins; otherwise the tab picked last (the hub reloads idle pages after updates).
+    active_site = _requested_site(
+        request.GET.get('site') or request.COOKIES.get(SITE_COOKIE), sites)
 
     show_events = policy.can_see_events(request)
     window = policy.event_window(request)

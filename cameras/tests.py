@@ -1920,6 +1920,22 @@ class MultiSiteTabTests(TestCase):
 
     @patch("cameras.views._register_streams_with_go2rtc")
     @patch("cameras.views.get_protect_cameras")
+    def test_reload_reopens_the_last_picked_tab(self, mock_cameras, mock_register):
+        """The hub reloads idle pages after updates; the tab picked last (cookie) reopens,
+        ?site= still wins, and a stale cookie falls back to the first tab."""
+        mock_cameras.return_value = [
+            {'name': 'Sun Peaks', 'host': '192.168.10.1', 'cameras': []},
+            {'name': 'Mercer Island', 'host': '192.168.1.26', 'cameras': []},
+        ]
+        for cookie, query, expected in [('mercer_island', '', 1), ('mercer_island', '?site=sun_peaks', 0),
+                                        ('gone', '', 0)]:
+            self.client.cookies['cameras_site'] = cookie
+            response = self.client.get("/cameras/" + query)
+            self.assertEqual(response.context['active_site'], expected, (cookie, query))
+        self.assertIn('data-site-name="Mercer Island"', response.content.decode())
+
+    @patch("cameras.views._register_streams_with_go2rtc")
+    @patch("cameras.views.get_protect_cameras")
     def test_sites_passed_in_context(self, mock_cameras, mock_register):
         """Context contains sites list with correct structure."""
         mock_cameras.return_value = [
@@ -2252,6 +2268,29 @@ class CameraStreamSeleniumTests(WebsocketLiveServerTestCase):
                 f"Expected data-mode='webrtc/tcp', got '{mode}'",
             )
             self.assertEqual(el.get_attribute('data-fallback-mode'), 'mse')
+
+    def test_reload_keeps_the_picked_site_tab(self):
+        """The hub reloads idle pages after an update; the site tab picked before it stays open."""
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        sites = [
+            {'name': 'Sun Peaks', 'host': '192.168.10.1', 'cameras': []},
+            {'name': 'Mercer Island', 'host': '192.168.1.26', 'cameras': []},
+        ]
+        active = "return document.querySelector('.site-tab.active')?.dataset.site"
+        with patch('cameras.policy.is_admin', return_value=True), \
+                patch('cameras.config.protect_sites', return_value=[{'name': s['name']} for s in sites]), \
+                patch('cameras.views.get_protect_cameras', return_value=sites), \
+                patch('cameras.views._register_streams_with_go2rtc'):
+            self.driver.get(f'{self.live_server_url}/cameras/')
+            self.assertEqual(self.driver.execute_script(active), '0')
+            self.driver.find_element(By.CSS_SELECTOR, '.site-tab[data-site="1"]').click()
+            WebDriverWait(self.driver, 5).until(lambda d: d.execute_script(active) == '1')
+            self.driver.refresh()
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == 'complete')
+            self.assertEqual(self.driver.execute_script(active), '1')
 
     def test_video_stream_custom_element_loads(self):
         """video-stream.js loads from go2rtc and registers the custom element.

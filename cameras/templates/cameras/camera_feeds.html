@@ -567,7 +567,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
 <div class="sitebar">
     <div class="site-tabs" role="group" aria-label="Location">
         {% for site in sites %}
-        <button type="button" class="site-tab{% if forloop.counter0 == active_site %} active{% endif %}" data-site="{{ forloop.counter0 }}" aria-pressed="{% if forloop.counter0 == active_site %}true{% else %}false{% endif %}"><i class="fas fa-location-dot"></i>{{ site.name }}</button>
+        <button type="button" class="site-tab{% if forloop.counter0 == active_site %} active{% endif %}" data-site="{{ forloop.counter0 }}" data-site-name="{{ site.name }}" aria-pressed="{% if forloop.counter0 == active_site %}true{% else %}false{% endif %}"><i class="fas fa-location-dot"></i>{{ site.name }}</button>
         {% endfor %}
     </div>
 </div>
@@ -1511,6 +1511,10 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     document.querySelectorAll('.site-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             const siteIdx = tab.dataset.site;
+
+            // Remember the tab, so the hub's idle reload after an update reopens it.
+            const slug = (tab.dataset.siteName || '').trim().toLowerCase().replace(/[ -]/g, '_');
+            if (slug) document.cookie = `cameras_site=${encodeURIComponent(slug)}; path=/; max-age=31536000; SameSite=Lax`;
 
             // Stop streams on the currently active panel
             const oldPanel = document.querySelector('.site-panel.active');
