@@ -13,6 +13,7 @@ from functools import wraps
 
 from bdh_sdk import push
 from bdh_sdk.rpc import BrokerError
+from django.core.cache import cache
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -20,7 +21,7 @@ from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET, require_POST
 
-from . import clips, config, events, frames, policy, popups
+from . import access_api, clips, config, events, frames, policy, popups
 from .models import ProtectEvent
 from .protect_api import (
     get_protect_cameras, ptz_goto_preset, refresh_talkback, talk_stream_name, talkback_source,
@@ -337,6 +338,7 @@ def camera_feed_view(request):
         if not admin:
             site_data = policy.guest_sites(site_data)
         talk, ptz = policy.can_talk(request), policy.can_ptz(request)
+        doors = _door_names() if admin else {}
 
         sites = []
         for site in site_data:
@@ -357,6 +359,7 @@ def camera_feed_view(request):
                     'talk_stream': (talk_stream_name(cam['stream_name'])
                                     if talk and cam.get('talkback') else ''),
                     'hi_stream': listen_stream_name(cam),
+                    'door_name': doors.get(cam.get('camera_id', ''), ''),
                 }
                 for cam in all_cameras
             ]
@@ -596,6 +599,7 @@ def popup(request, camera_id):
         'poster': _cached_poster(camera_id),
         'watch_path': WATCH_PATH,
         'video_mode': config.video_mode(),
+        'door_name': _door_names().get(camera_id, '') if policy.is_admin(request) else '',
     })
 
 
@@ -686,6 +690,123 @@ def ptz_goto(request):
             {'success': False, 'error': str(e)},
             status=400,
         )
+
+
+def _door_for(camera_id):
+    """``(site, door)`` for a camera mapped to a door, from the site whose map has it.
+
+    Only sites with Access set up (host and token) count; never a fallback site.
+    """
+    for site in config.protect_sites():
+        if not (site.get('access_host') and site.get('access_token')):
+            continue
+        door = (site.get('door_map') or {}).get(camera_id)
+        if door:
+            return site, door
+    return None, None
+
+
+def _door_names():
+    """``{camera_id: door name}`` for cameras with a door to unlock (admins only)."""
+    names = {}
+    for site in config.protect_sites():
+        if site.get('access_host') and site.get('access_token'):
+            for cam, door in (site.get('door_map') or {}).items():
+                names.setdefault(cam, door['name'])
+    return names
+
+
+def _hub_label():
+    try:
+        from bdh_sdk.location import location
+        loc = location()
+        if loc and getattr(loc, 'name', ''):
+            return loc.name
+    except Exception:
+        pass
+    try:
+        from bdh_sdk.branding import brand
+        return brand().get('name') or ''
+    except Exception:
+        return ''
+
+
+DOOR_TOPIC = 'cameras/door/unlocked'
+DOOR_REPEAT_SECONDS = 3
+
+
+def _notify_unlock(text, payload):
+    """Tell admins about an unlock (admin-only push topic); never fails the unlock."""
+    try:
+        from bdh_sdk import events as bus
+        bus.publish(DOOR_TOPIC, {**payload, 'message': text})
+    except Exception as err:
+        logger.warning("Door unlock notification failed: %s", err)
+
+
+@require_POST
+def door_unlock(request):
+    """Momentarily unlock the door mapped to a camera (admins only).
+
+    JSON body ``{"camera_id": "..."}``; the door, console and token come from
+    the NVRs settings, never the page. Returns ``{ok, door, error?, maybe_unlocked?}``.
+    """
+    if not policy.is_admin(request):
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'ok': False, 'error': 'bad json'}, status=400)
+    camera_id = data.get('camera_id') if isinstance(data, dict) else None
+    if not isinstance(camera_id, str) or not camera_id:
+        return JsonResponse({'ok': False, 'error': 'missing camera_id'}, status=400)
+    site, door = _door_for(camera_id)
+    if door is None:
+        return JsonResponse({'ok': False, 'error': 'no door'}, status=404)
+
+    user = getattr(getattr(request, 'user', None), 'username', '') or 'admin'
+    site_name = site.get('name') or site.get('host', '')
+    label = _hub_label() or site_name
+    actor_name = f"BlackDiamondHub {label} \u2013 {user}"
+    where = f"{door['name']} ({site_name})"
+
+    # One unlock per door per few seconds: a repeat is a duplicate while the
+    # first is in flight or after it worked, but a failure doesn't count.
+    key = f"cameras:door:{site['id']}:{door['id']}"
+    if not cache.add(key, 'pending', DOOR_REPEAT_SECONDS):
+        state = cache.get(key)
+        if state in ('pending', 'ok'):
+            logger.warning("Door unlock %s by %s via camera %s: duplicate (%s)", where, user, camera_id, state)
+            return JsonResponse({'ok': True, 'door': door['name'], 'duplicate': True})
+        cache.set(key, 'pending', DOOR_REPEAT_SECONDS)
+
+    payload = {'door': door['name'], 'site': site_name, 'user': user, 'camera_id': camera_id}
+    try:
+        access_api.unlock(site['access_host'], site['access_token'], door['id'],
+                          f"bdh:{user}", actor_name, site.get('access_pin', ''))
+    except access_api.AccessError as err:
+        cache.delete(key)
+        logger.warning("Door unlock %s by %s via camera %s: %s", where, user, camera_id, err.kind)
+        if err.kind == 'timeout':
+            _notify_unlock(f"{where} may have unlocked (no reply) \u2013 {user}", {**payload, 'result': 'timeout'})
+            return JsonResponse({'ok': False, 'door': door['name'], 'maybe_unlocked': True,
+                                 'error': 'No reply \u2014 the door may have unlocked'}, status=504)
+        errors = {
+            'unauthorized': ('Access turned down the token', 502),
+            'not_found': ('Door not found in Access', 502),
+            'pin_mismatch': ("Access's certificate changed", 502),
+            'unreachable': ("Couldn't reach Access", 504),
+        }
+        msg, status = errors.get(err.kind, ("Access didn't unlock the door", 502))
+        return JsonResponse({'ok': False, 'door': door['name'], 'error': msg}, status=status)
+    except Exception:
+        cache.delete(key)
+        logger.exception("Door unlock %s by %s via camera %s failed", where, user, camera_id)
+        return JsonResponse({'ok': False, 'door': door['name'], 'error': "Access didn't unlock the door"}, status=502)
+    cache.set(key, 'ok', DOOR_REPEAT_SECONDS)
+    logger.warning("Door unlock %s by %s via camera %s: unlocked", where, user, camera_id)
+    _notify_unlock(f"{where} unlocked by {user}", {**payload, 'result': 'unlocked'})
+    return JsonResponse({'ok': True, 'door': door['name']})
 
 
 RTC_DIAG_MAX_BYTES = 16 * 1024
@@ -985,8 +1106,22 @@ def _nvr_rows():
             "username": n.get("username", ""),
             "has_api_key": site is not None,
             "has_password": bool(site and site.get("password")),
+            "access_host": n.get("access_host", ""),
+            "has_access_token": bool(site and site.get("access_token")),
+            "door_map": config.clean_door_map(n.get("door_map")) if n.get("access_host") else {},
         })
     return rows
+
+
+def _nvr_cameras():
+    """``{nvr_id: [{id, name}]}``: each NVR's cameras for the door mapping table."""
+    try:
+        return {s["id"]: [{"id": c["id"], "name": c["name"]} for c in s["cameras"]]
+                for s in _detection_sites() if s.get("id")}
+    except Exception:
+        logger.exception("Could not list the cameras for door mapping")
+        return {k: [{"id": c["id"], "name": c["name"]} for c in v if isinstance(c, dict) and c.get("id")]
+                for k, v in config.known_detections().items() if isinstance(v, list)}
 
 
 def _nvrs_changed():
@@ -1020,9 +1155,11 @@ def nvr_settings(request):
         "active": "cameras",
         "page": {
             "nvrs": rows, "error": error,
+            "cameras": _nvr_cameras() if any(r.get("access_host") for r in rows) else {},
             "save_url": reverse("cameras_nvr_save"),
             "remove_url": reverse("cameras_nvr_remove"),
             "test_url": reverse("cameras_nvr_test"),
+            "access_test_url": reverse("cameras_nvr_access_test"),
         },
     })
 
@@ -1068,13 +1205,25 @@ def nvr_save(request):
     if username and not password and not (has_password and existing.get("username") == username):
         return JsonResponse({"error": "Enter the password for that account.", "field": "password"}, status=400)
 
+    access, access_error = _access_settings(raw, existing, nvr_id)
+    if access_error:
+        return access_error
+
     if api_key:
         secrets.set(config.api_key_secret(nvr_id), api_key, app="cameras")
+    if access.pop("token", None):
+        secrets.set(config.access_token_secret(nvr_id), access["new_token"], app="cameras")
+    elif access.pop("drop_token", False):
+        try:
+            secrets.delete(config.access_token_secret(nvr_id), app="cameras")
+        except Exception:
+            logger.exception("Could not delete the Access token")
+    access.pop("new_token", None)
     if username and password:
         secrets.set(config.password_secret(nvr_id), password, app="cameras")
     elif not username and has_password:
         secrets.delete(config.password_secret(nvr_id), app="cameras")
-    entry = {"id": nvr_id, "name": name, "host": host, "username": username}
+    entry = {"id": nvr_id, "name": name, "host": host, "username": username, **access}
     if existing:
         items = [entry if n["id"] == nvr_id else n for n in items]
     else:
@@ -1102,13 +1251,104 @@ def nvr_remove(request):
         return JsonResponse({"error": "That NVR was already removed."}, status=404)
     protect_api.clear_cache()
     config.save_nvrs([n for n in items if n["id"] != nvr_id])
-    for name in (config.api_key_secret(nvr_id), config.password_secret(nvr_id)):
+    for name in (config.api_key_secret(nvr_id), config.password_secret(nvr_id),
+                 config.access_token_secret(nvr_id)):
         try:
             secrets.delete(name, app="cameras")
         except Exception:
             logger.exception("Could not delete secret %s", name)
     _nvrs_changed()
     return JsonResponse({"ok": True, "nvrs": _nvr_rows()})
+
+
+def _access_pin_key(host):
+    return f"cameras:access_pin:{host.lower()}"
+
+
+def _access_settings(raw, existing, nvr_id):
+    """The door unlock part of an NVR save: ``(entry fields, error response)``.
+
+    Door unlock is optional. ``access_remove`` turns it off (token, console,
+    certificate and door map all go). Otherwise a token needs the Access
+    console's host (never the NVR's), a blank token keeps the saved one, and
+    the console's certificate is pinned: from the last test of that host,
+    the saved pin if the host is unchanged, or fetched now.
+    """
+    from bdh_sdk import secrets
+
+    existing = existing or {}
+    old_host = existing.get("access_host", "")
+    has_token = bool(old_host and secrets.get(config.access_token_secret(nvr_id), "", app="cameras")) \
+        if existing else False
+    off = {"drop_token": bool(old_host)}
+    if raw.get("access_remove"):
+        return off, None
+    host_raw = _text(raw.get("access_host"))
+    host = _clean_host(host_raw)
+    token = _text(raw.get("access_token"), 1024)
+    if host_raw and not host:
+        return None, JsonResponse({"error": "Enter the Access console's IP address or host name.",
+                                   "field": "access_host"}, status=400)
+    if not host:
+        if token or has_token:
+            return None, JsonResponse({"error": "Enter the Access console's IP address, or remove door unlock.",
+                                       "field": "access_host"}, status=400)
+        return off, None
+    if not token and not has_token:
+        return None, JsonResponse({"error": "Enter the Access API token.", "field": "access_token"}, status=400)
+
+    pin = access_api.clean_pin(cache.get(_access_pin_key(host)))
+    if not pin and host.lower() == old_host.lower():
+        pin = access_api.clean_pin(existing.get("access_pin"))
+    if not pin:
+        try:
+            pin = access_api.fetch_pin(host)
+        except access_api.AccessError:
+            return None, JsonResponse({"error": f"Couldn't reach {host}.", "field": "access_host"}, status=400)
+    door_map = raw.get("door_map")
+    door_map = config.clean_door_map(door_map if isinstance(door_map, dict) else existing.get("door_map"))
+    out = {"access_host": host, "access_pin": pin, "door_map": door_map}
+    if token:
+        out.update(token=True, new_token=token)
+    return out, None
+
+
+@_settings_admin_only
+@require_POST
+def nvr_access_test(request):
+    """Check an Access console and token: lists its doors and pins its certificate.
+
+    ``{ok, doors: [{id, name}], cameras: [{id, name}]}`` or ``{ok: false, error, field}``.
+    A blank token for a saved NVR (``id``) uses the saved one.
+    """
+    from bdh_sdk import secrets
+
+    raw = _json_body(request)
+    if raw is None:
+        return JsonResponse({"error": "bad JSON"}, status=400)
+    host = _clean_host(raw.get("access_host"))
+    if not host:
+        return JsonResponse({"ok": False, "error": "Enter the Access console's IP address or host name.",
+                             "field": "access_host"})
+    nvr_id = str(raw.get("id") or "")
+    saved = next((n for n in config.nvrs() if n["id"] == nvr_id), None) if nvr_id else None
+    token = _text(raw.get("access_token"), 1024)
+    if not token and saved and saved.get("access_host"):
+        token = secrets.get(config.access_token_secret(nvr_id), "", app="cameras")
+    if not token:
+        return JsonResponse({"ok": False, "error": "Enter the Access API token.", "field": "access_token"})
+    try:
+        pin = access_api.fetch_pin(host)
+        doors = access_api.list_doors(host, token, pin)
+    except access_api.AccessError as err:
+        if err.kind == "unauthorized":
+            return JsonResponse({"ok": False, "error": "Access turned down that token.", "field": "access_token"})
+        if err.kind in ("unreachable", "timeout", "pin_mismatch"):
+            return JsonResponse({"ok": False, "error": f"Couldn't reach {host}.", "field": "access_host"})
+        return JsonResponse({"ok": False, "error": "That doesn't look like a UniFi Access console.",
+                             "field": "access_host"})
+    cache.set(_access_pin_key(host), pin, 600)
+    return JsonResponse({"ok": True, "doors": doors, "cameras": _nvr_cameras().get(nvr_id, []) if nvr_id else []})
 
 
 def _test_login(host, username, password):

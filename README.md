@@ -112,6 +112,36 @@ The rules are enforced on the server for every page and API serving camera data 
 page, the home page tile, pop-ups, talk, PTZ, events, thumbnails, snapshots and clips): a camera
 hidden from guests is a 403/404 for them everywhere. The settings pages are admin-only.
 
+## Door unlock (UniFi Access)
+
+Optional, admin-only: a camera can be mapped to a UniFi Access door (an electric strike), and
+admins then get a round lock button on that camera in the full-screen player (bottom left), on
+the hero tile and in its doorbell pop-up. Guests never see it, and the server refuses unlocks
+from anyone who isn't an admin. An NVR without Access settings shows nothing door-related.
+
+**Token:** in the UniFi Access app, Settings → API Token → create one with **Locations: Edit**
+and every other permission set to None.
+
+**Settings → NVRs → (NVR) → Door unlock:** enter the Access console's IP address (it need not be
+the NVR's — e.g. a separate Cloud Gateway) and the token, then **Find doors** to list the doors and
+pick one per camera (exact or prefix name matches, like "Front Door - Entry" → "Front Door", are
+preselected). The token is kept in the hub's vault (`access_token_<nvr id>`); leave it blank to
+keep the saved one. **Turn off door unlock** forgets the console, token and mapping. Every
+NVR on every hub can be set up, so one house's hub can unlock the other's door over the VPN.
+
+**Hold to unlock:** press and hold the button for 3 seconds while the ring fills; letting go,
+sliding off, switching camera or replay cancels it. Space/Enter held does the same. The hub then
+asks Access for a momentary unlock (Access relocks the door itself), shown in the Access log as
+"BlackDiamondHub <hub> – <admin>". No reply within the timeout shows "No reply — the door may
+have unlocked"; nothing is retried, and a second press within 3 s of a success isn't sent again.
+
+**Notifications:** every unlock (and every "may have unlocked") is logged and published on the
+admin-only `cameras/door/unlocked` event topic, e.g. "Front Door (Sun Peaks) unlocked by stefan".
+
+**Certificate pinning:** the Access console's self-signed certificate is pinned (SHA-256) when
+the settings are tested or saved; if the console's certificate changes, unlocks fail until you
+**Find doors** and save again.
+
 ## Screen saver
 
 While the cameras page is open the hub screen saver stays off, so the cameras stay on screen.

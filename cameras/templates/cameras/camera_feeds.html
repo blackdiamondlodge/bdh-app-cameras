@@ -321,6 +321,11 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     .cam-spk { top: 84px; right: 24px; }
     .cam-spk.on { background: rgba(91,164,230,.85); border-color: #9cc9f2; }
 {% include "cameras/_talk_style.html" %}
+{% include "cameras/_unlock_style.html" %}
+    /* Door unlock: the hero and fullscreen only (never grid tiles), bottom
+       left above the camera name, like the PTZ presets bottom right. */
+    .cam-card.hero .cam-unlock-wrap { display: flex; left: 16px; bottom: 68px; }
+    .cam-card:fullscreen .cam-unlock-wrap { display: flex; left: 24px; bottom: 92px; }
     .cam-fs-clock {
         position: absolute;
         z-index: 2;
@@ -462,6 +467,8 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     }
     .cam-card:fullscreen.chrome-hidden .cam-label,
     .cam-card:fullscreen.chrome-hidden .ptz-controls { bottom: 24px; }
+    .cam-card:fullscreen .cam-unlock-wrap { bottom: 218px; }
+    .cam-card:fullscreen.chrome-hidden .cam-unlock-wrap { bottom: 92px; }
     .cam-card:fullscreen.replaying .cam-replay,
     .cam-card:fullscreen.scrubbing .cam-still { display: block; }
     .cam-replay, .cam-still {
@@ -471,7 +478,9 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
     .cam-card.scrubbing .cam-replay, .cam-replay.standby { visibility: hidden; }
     /* Presets only make sense while watching live. */
     .cam-card:fullscreen.replaying .ptz-controls,
-    .cam-card:fullscreen.scrubbing .ptz-controls { display: none; }
+    .cam-card:fullscreen.scrubbing .ptz-controls,
+    .cam-card.replaying .cam-unlock-wrap,
+    .cam-card.scrubbing .cam-unlock-wrap { display: none; }
     /* Hold the preview frame over the replay video until it starts playing. */
     .cam-card:fullscreen.replaying.loading .cam-still[src] { display: block; z-index: 2; }
     .cam-still.low { filter: blur(3px); }
@@ -590,6 +599,7 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
             {% endfor %}
         </div>
         {% endif %}
+        {% if stream.door_name %}{% include "cameras/_unlock_button.html" with door_name=stream.door_name %}{% endif %}
         <div class="cam-status"></div>
         <div class="cam-label">{{ stream.display_name }}{% if stream.talk_stream %}<i class="fas fa-microphone cam-talk-badge" aria-hidden="true"></i>{% endif %}</div>
         <div class="cam-fs-bar">
@@ -1685,6 +1695,28 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         if (talk.card && talk.card !== fs) stopTalk();
     });
 
+{% include "cameras/_unlock_script.html" %}
+    // Door unlock (admins): a hold counts only for the camera it started on,
+    // while that camera is the hero or fullscreen and showing live.
+    document.querySelectorAll('.cam-card .cam-unlock-wrap').forEach(wrap => {
+        const card = wrap.closest('.cam-card');
+        const hold = bdhUnlock.init(wrap, {
+            url: '{% url "door_unlock" %}',
+            csrf: '{{ csrf_token }}',
+            cameraId: () => card.dataset.cameraId,
+            valid: cam => cam === card.dataset.cameraId && card.getClientRects().length > 0
+                && !card.classList.contains('replaying') && !card.classList.contains('scrubbing')
+                && (document.fullscreenElement ? document.fullscreenElement === card : card.classList.contains('hero')),
+            onState: state => { if (state) card.dataset.unlock = state; else delete card.dataset.unlock; },
+        });
+        card.addEventListener('cam:live', e => { if (!e.detail) hold.cancel(); });
+        new MutationObserver(() => {
+            if (card.classList.contains('replaying') || card.classList.contains('scrubbing')) hold.cancel();
+        }).observe(card, {attributes: true, attributeFilter: ['class']});
+    });
+    document.addEventListener('fullscreenchange', () => bdhUnlock.cancelAll());
+    document.querySelectorAll('.site-tab').forEach(t => t.addEventListener('click', () => bdhUnlock.cancelAll()));
+
     // PTZ preset buttons
     document.querySelectorAll('.ptz-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -2456,7 +2488,8 @@ dropped ~85% of frames on the Sun Peaks tab (1.7.5). See README "Display perform
         const s = scrubbers.get(card);
         if (!s) return;
         const paused = s.mode === 'replay' && s.video.paused && !s.video.ended;
-        if (s.dragging || paused || s.clipFailed) { chromeTID = setTimeout(hideChrome, CHROME_IDLE_MS); return; }
+        // A door unlock being held or showing its result keeps the controls up.
+        if (s.dragging || paused || s.clipFailed || card.dataset.unlock) { chromeTID = setTimeout(hideChrome, CHROME_IDLE_MS); return; }
         s.hideCard();
         s.note('hide-chrome', s.video);
         card.classList.add('chrome-hidden');

@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('', views.camera_feed_view, name='cameras'),
     path('ptz/goto/', views.ptz_goto, name='ptz_goto'),
+    path('door/unlock/', views.door_unlock, name='door_unlock'),
     path('api/talk/prepare/', views.talk_prepare, name='camera_talk_prepare'),
     path('go2rtc/<str:name>', views.go2rtc_script, name='camera_go2rtc_script'),
     path('diag/rtc/', views.rtc_diag, name='camera_rtc_diag'),
@@ -21,4 +22,5 @@ urlpatterns = [
     path('settings/nvrs/save/', views.nvr_save, name='cameras_nvr_save'),
     path('settings/nvrs/remove/', views.nvr_remove, name='cameras_nvr_remove'),
     path('settings/nvrs/test/', views.nvr_test, name='cameras_nvr_test'),
+    path('settings/nvrs/access-test/', views.nvr_access_test, name='cameras_nvr_access_test'),
 ]
