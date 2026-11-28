@@ -31,11 +31,28 @@ def password_secret(nvr_id):
     return f"protect_password_{nvr_id}"
 
 
+def access_token_secret(nvr_id):
+    """The NVR's site's UniFi Access API token (door unlock; optional)."""
+    return f"access_token_{nvr_id}"
+
+
+def clean_door_map(raw):
+    """``{camera_id: {"id": door_id, "name": door_name}}``, dropping malformed entries."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for cam, door in raw.items():
+        if isinstance(cam, str) and cam and isinstance(door, dict) and isinstance(door.get("id"), str) and door["id"]:
+            out[cam] = {"id": door["id"], "name": str(door.get("name") or door["id"])}
+    return out
+
+
 def nvrs():
     """The UniFi Protect consoles (NVRs) set up on the NVRs settings page.
 
-    A list of ``{id, name, host, username}``; the API key and password are
-    secrets.
+    A list of ``{id, name, host, username}`` plus the optional door unlock
+    settings ``access_host``, ``access_pin`` and ``door_map``; the API key,
+    password and Access token are secrets.
     """
     from bdh_sdk.storage import app_state
 
@@ -47,10 +64,15 @@ def save_nvrs(items):
     """Store the NVR list (secrets are set separately) and drop the cached sites."""
     from bdh_sdk.storage import app_state
 
-    app_state("cameras").set(NVRS_KEY, [
-        {"id": n["id"], "name": n["name"], "host": n["host"], "username": n.get("username", "")}
-        for n in items
-    ])
+    rows = []
+    for n in items:
+        row = {"id": n["id"], "name": n["name"], "host": n["host"], "username": n.get("username", "")}
+        if n.get("access_host"):
+            row["access_host"] = n["access_host"]
+            row["access_pin"] = n.get("access_pin", "")
+            row["door_map"] = clean_door_map(n.get("door_map"))
+        rows.append(row)
+    app_state("cameras").set(NVRS_KEY, rows)
     forget_sites()
 
 
@@ -62,6 +84,9 @@ def forget_sites():
 
 def protect_sites():
     """UniFi Protect sites as dicts with id, host, api_key, name, username and password.
+
+    Plus the optional UniFi Access settings for door unlock: access_host,
+    access_token, access_pin and door_map (empty without them).
 
     From the NVRs settings page, the only source. A site needs both a host and
     an API key; the username and password are an optional local Protect
@@ -86,10 +111,20 @@ def protect_sites():
             "name": n.get("name") or n["host"],
             "username": n.get("username", ""),
             "password": secrets.get(password_secret(n["id"]), "", app="cameras") if n.get("username") else "",
+            **_access(n, secrets),
         })
     with _sites_lock:
         _sites_cache = (time.monotonic() + SITES_TTL, sites)
     return [dict(s) for s in sites]
+
+
+def _access(n, secrets):
+    host = n.get("access_host") or ""
+    token = secrets.get(access_token_secret(n["id"]), "", app="cameras") if host else ""
+    if not (host and token):
+        return {"access_host": "", "access_token": "", "access_pin": "", "door_map": {}}
+    return {"access_host": host, "access_token": token, "access_pin": n.get("access_pin") or "",
+            "door_map": clean_door_map(n.get("door_map"))}
 
 
 # Event kinds in display order: (label, group, shown by default).

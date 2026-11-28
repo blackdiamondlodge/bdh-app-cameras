@@ -1,0 +1,11 @@
+{% comment %}
+Hold-to-unlock door button (admins only), shared by the cameras page and the
+pop-up. Wire it up with bdhUnlock.init (see _unlock_script.html).
+{% endcomment %}<div class="cam-unlock-wrap" data-door="{{ door_name }}">
+    <button type="button" class="cam-unlock" aria-label="Hold to unlock {{ door_name }}">
+        <svg class="ring" viewBox="0 0 64 64" aria-hidden="true"><circle class="track" cx="32" cy="32" r="30"/><circle class="fill" cx="32" cy="32" r="30"/></svg>
+        <svg class="ico ico-shut" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 5a3 3 0 0 1 6 0v3H9V7zm3 6.5a1.5 1.5 0 0 1 .75 2.8V18h-1.5v-1.7A1.5 1.5 0 0 1 12 13.5z"/></svg>
+        <svg class="ico ico-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-4V7a3 3 0 0 1 6 0v1h2V7a5 5 0 0 0-5-5zm-5 11.5a1.5 1.5 0 0 1 .75 2.8V18h-1.5v-1.7A1.5 1.5 0 0 1 12 13.5z"/></svg>
+    </button>
+    <div class="cam-unlock-msg" role="status" aria-live="polite"></div>
+</div>

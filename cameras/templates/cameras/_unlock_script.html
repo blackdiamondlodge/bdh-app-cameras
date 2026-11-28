@@ -1,0 +1,127 @@
+{% comment %}
+Hold-to-unlock door button, shared by the cameras page and the pop-up. Include
+inside a plain <script>. Defines window.bdhUnlock:
+
+  bdhUnlock.init(wrap, {url, csrf, cameraId(), valid(cameraId), onState(state), onHold(), onRelease()})
+  bdhUnlock.cancelAll()   // a hold in progress snaps back (pending/result states finish)
+
+Holding the button (primary pointer, or Space/Enter) for HOLD_MS fills the
+ring and posts once; letting go, sliding off, the page hiding or the page
+calling cancelAll() first cancels. There's deliberately no click handler.
+{% endcomment %}
+    window.bdhUnlock = (function () {
+        const HOLD_MS = 3000, OK_MS = 5000, ERR_MS = 4000, SLOP_PX = 16;
+        const holds = new Set();
+
+        function init(wrap, opts) {
+            const btn = wrap.querySelector('.cam-unlock');
+            const msg = wrap.querySelector('.cam-unlock-msg');
+            const door = wrap.dataset.door || 'Door';
+            let timer = 0, t0 = 0, camera = null, pointer = null, key = false, busy = false, resetTID = 0;
+
+            function set(state, text) {
+                if (state) wrap.dataset.unlock = state; else delete wrap.dataset.unlock;
+                msg.textContent = text || '';
+                if (opts.onState) opts.onState(state || null);
+            }
+            function release() { if (opts.onRelease) opts.onRelease(); }
+
+            function start() {
+                if (busy || timer) return false;
+                clearTimeout(resetTID);
+                camera = opts.cameraId();
+                t0 = performance.now();
+                set('holding', 'Hold to unlock ' + door);
+                if (opts.onHold) opts.onHold();
+                timer = setTimeout(due, HOLD_MS);
+                return true;
+            }
+            function cancel() {
+                if (!timer) return;
+                clearTimeout(timer);
+                timer = 0; pointer = null; key = false;
+                set(null);
+                release();
+            }
+            function due() {
+                // Timers can fire a touch early; only a full hold counts.
+                const left = HOLD_MS - (performance.now() - t0);
+                if (left > 0) { timer = setTimeout(due, left); return; }
+                timer = 0; pointer = null; key = false;
+                if (!opts.valid(camera)) { set(null); release(); return; }
+                send(camera);
+            }
+            async function send(cam) {
+                busy = true;
+                set('pending', 'Unlocking ' + door + '…');
+                let data = null, status = 0;
+                try {
+                    const r = await fetch(opts.url, {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: {'Content-Type': 'application/json', 'X-CSRFToken': opts.csrf},
+                        body: JSON.stringify({camera_id: cam}),
+                    });
+                    status = r.status;
+                    try { data = await r.json(); } catch (e) { data = null; }
+                } catch (e) { data = null; }
+                busy = false;
+                let ms = ERR_MS;
+                if (data && data.ok) {
+                    set('ok', (data.door || door) + ' unlocked');
+                    ms = OK_MS;
+                    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* not supported */ }
+                } else if (data && data.maybe_unlocked) {
+                    set('maybe', 'No reply — door may have unlocked');
+                    ms = OK_MS;
+                } else {
+                    set('err', (data && data.error) || (status === 403 ? 'Not allowed' : "Couldn't unlock " + door));
+                }
+                resetTID = setTimeout(() => { set(null); release(); }, ms);
+            }
+
+            btn.addEventListener('pointerdown', e => {
+                e.stopPropagation();
+                if (e.button !== 0 || !e.isPrimary || pointer !== null || key) return;
+                e.preventDefault();
+                if (!start()) return;
+                pointer = e.pointerId;
+                try { btn.setPointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+            });
+            // Touch captures the pointer implicitly, so pointerleave never
+            // fires: check the finger is still over the button.
+            btn.addEventListener('pointermove', e => {
+                if (e.pointerId !== pointer) return;
+                const r = btn.getBoundingClientRect();
+                if (e.clientX < r.left - SLOP_PX || e.clientX > r.right + SLOP_PX
+                    || e.clientY < r.top - SLOP_PX || e.clientY > r.bottom + SLOP_PX) cancel();
+            });
+            for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+                btn.addEventListener(type, e => { if (e.pointerId === pointer) cancel(); });
+            }
+            btn.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
+            btn.addEventListener('contextmenu', e => e.preventDefault());
+            btn.addEventListener('keydown', e => {
+                if (e.key !== ' ' && e.key !== 'Enter') return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.repeat || key || pointer !== null) return;
+                if (start()) key = true;
+            });
+            btn.addEventListener('keyup', e => {
+                if (e.key !== ' ' && e.key !== 'Enter') return;
+                e.preventDefault();
+                if (key) cancel();
+            });
+            btn.addEventListener('blur', () => { if (key) cancel(); });
+
+            const hold = {cancel, wrap};
+            holds.add(hold);
+            wrap._unlock = hold;
+            return hold;
+        }
+
+        function cancelAll() { holds.forEach(h => h.cancel()); }
+        document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAll(); });
+        window.addEventListener('blur', cancelAll);
+        return {init, cancelAll};
+    })();

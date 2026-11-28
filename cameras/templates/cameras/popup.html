@@ -36,6 +36,8 @@ repainting animations stall WebRTC video decode. See README "Display performance
     .cam-spk .spk-on, .cam-spk.on .spk-off { display: none; }
     .cam-spk.on { background: rgba(91,164,230,.85); border-color: #9cc9f2; }
 {% include "cameras/_talk_style.html" %}
+{% include "cameras/_unlock_style.html" %}
+    .cam-unlock-wrap { display: flex; left: 24px; bottom: 54px; }
     /* Ends the conversation: mic off and the pop-up closes (see talkHangup). */
     .cam-hangup { display: none; }
     .cam-card.can-talk[data-talk] .cam-hangup {
@@ -58,6 +60,7 @@ repainting animations stall WebRTC video decode. See README "Display performance
 <button type="button" class="cam-talk" aria-label="Talk"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1a7 7 0 0 0 6-6.9h-2z"/></svg></button>
 <button type="button" class="cam-hangup" aria-label="Hang up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.99.99 0 0 1 0-1.41C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.3 11.3 0 0 0-2.67-1.85.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>Hang up</button>
 <div class="cam-talk-toast" role="status"></div>{% endif %}
+{% if door_name %}{% include "cameras/_unlock_button.html" %}{% endif %}
 </div>
 <div class="state">LIVE</div>
 <script>
@@ -91,8 +94,21 @@ repainting animations stall WebRTC video decode. See README "Display performance
     function tellHub(cmd) {
         if (window !== window.parent) window.parent.postMessage({bdh: 1, type: 'alert', cmd: cmd}, '*');
     }
-    function talkStateChanged(c, s) { tellHub(s ? 'hold' : 'release'); }
+    // Talk and a door unlock each keep the pop-up open; neither lets go of the other's hold.
+    function talkStateChanged(c, s) { tellHub(s || card.dataset.unlock ? 'hold' : 'release'); }
 {% include "cameras/_talk_script.html" %}
+{% if door_name %}
+{% include "cameras/_unlock_script.html" %}
+    bdhUnlock.init(card.querySelector('.cam-unlock-wrap'), {
+        url: '{% url "door_unlock" %}',
+        csrf: '{{ csrf_token }}',
+        cameraId: () => card.dataset.cameraId,
+        valid: cam => cam === card.dataset.cameraId,
+        onState: state => { if (state) card.dataset.unlock = state; else delete card.dataset.unlock; },
+        onHold: () => tellHub('hold'),
+        onRelease: () => { if (!card.dataset.talk) tellHub('release'); },
+    });
+{% endif %}
     card.querySelector('.cam-hangup')?.addEventListener('click', e => {
         e.stopPropagation();
         stopTalk();

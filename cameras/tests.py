@@ -2547,6 +2547,87 @@ class CameraStreamSeleniumTests(WebsocketLiveServerTestCase):
         self.assertNotIn('start', [c[0] for c in calls])
         self.assertIsNone(card.get_attribute('data-talk'))
 
+    def _open_unlock_page(self):
+        """Admin camera page in fullscreen on door1, mapped to a door; returns (card, unlock mock)."""
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        cam = {'name': 'Front Door', 'stream_name': 'test_cam', 'rtsp_url': 'rtsps://x',
+               'rtsp_url_low': '', 'camera_id': 'door1', 'is_ptz': False, 'ptz_presets': 0}
+        cams = [{'id': '1', 'name': 'Test Site', 'host': '192.168.10.1', 'cameras': [cam]}]
+        site = {'id': '1', 'name': 'Test Site', 'host': '192.168.10.1', 'access_host': '192.168.10.1',
+                'access_token': 't', 'access_pin': 'ab' * 32,
+                'door_map': {'door1': {'id': 'd1', 'name': 'Front Door'}}}
+        patches = (
+            patch('cameras.policy.is_admin', return_value=True),
+            patch('cameras.config.protect_sites', return_value=[site]),
+            patch('cameras.views.get_protect_cameras', return_value=cams),
+            patch('cameras.views._register_streams_with_go2rtc'),
+            patch('cameras.views._cached_poster', return_value=None),
+            patch('cameras.views._notify_unlock'),
+            patch('cameras.views.access_api.unlock', return_value=True),
+        )
+        for p in patches:
+            mock = p.start()
+            self.addCleanup(p.stop)
+        django_cache.clear()
+        self.driver.get(f'{self.live_server_url}/cameras/')
+        card = WebDriverWait(self.driver, 10).until(
+            lambda d: d.find_element(By.CSS_SELECTOR, '.cam-card[data-camera-id="door1"]'))
+        card.find_element(By.CSS_SELECTOR, '.cam-touch-overlay').click()
+        try:
+            WebDriverWait(self.driver, 3).until(
+                lambda d: d.execute_script("return document.fullscreenElement === arguments[0]", card))
+        except Exception:
+            self.skipTest('Browser did not enter fullscreen')
+        WebDriverWait(self.driver, 3).until(lambda d: self._shown(card, '.cam-unlock'))
+        return card, mock
+
+    def test_unlock_needs_a_full_hold(self):
+        """Letting go before 3 s snaps the ring back and sends nothing; a full
+        hold posts exactly once."""
+        import time as _time
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        card, unlock = self._open_unlock_page()
+        btn = card.find_element(By.CSS_SELECTOR, '.cam-unlock')
+        wrap = card.find_element(By.CSS_SELECTOR, '.cam-unlock-wrap')
+        ActionChains(self.driver).click_and_hold(btn).perform()
+        WebDriverWait(self.driver, 2).until(lambda d: wrap.get_attribute('data-unlock') == 'holding')
+        _time.sleep(1)
+        ActionChains(self.driver).release().perform()
+        self.assertIsNone(wrap.get_attribute('data-unlock'))
+        _time.sleep(2.5)  # past when the early hold would have fired
+        unlock.assert_not_called()
+
+        start = _time.monotonic()
+        ActionChains(self.driver).click_and_hold(btn).perform()
+        WebDriverWait(self.driver, 8).until(lambda d: wrap.get_attribute('data-unlock') == 'ok')
+        self.assertGreaterEqual(_time.monotonic() - start, 2.9)
+        ActionChains(self.driver).release().perform()
+        self.assertIn('Front Door unlocked', wrap.text)
+        unlock.assert_called_once()
+        self.assertEqual(unlock.call_args.args[2], 'd1')
+        # Still holding past the result, or releasing, never sends another.
+        _time.sleep(0.5)
+        unlock.assert_called_once()
+
+    def test_unlock_cancels_when_the_pointer_slides_off(self):
+        import time as _time
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.by import By
+
+        card, unlock = self._open_unlock_page()
+        btn = card.find_element(By.CSS_SELECTOR, '.cam-unlock')
+        wrap = card.find_element(By.CSS_SELECTOR, '.cam-unlock-wrap')
+        ActionChains(self.driver).click_and_hold(btn).pause(0.5).move_by_offset(200, -200).perform()
+        self.assertIsNone(wrap.get_attribute('data-unlock'))
+        _time.sleep(3)
+        ActionChains(self.driver).release().perform()
+        unlock.assert_not_called()
+
     def test_popup_in_iframe_talks_and_hears_kiosk_callbacks(self):
         """The doorbell pop-up (an iframe in the hub) opens with sound on and
         the mic off, and talk state reaches it.
@@ -4216,7 +4297,8 @@ class BrokerTests(TestCase):
         with patch.object(config, "protect_sites", _real_protect_sites):
             self.assertEqual(config.protect_sites(), [
                 {"id": "2", "host": "10.0.0.2", "api_key": "k", "name": "Shop",
-                 "username": "viewer", "password": "pw"}])
+                 "username": "viewer", "password": "pw",
+                 "access_host": "", "access_token": "", "access_pin": "", "door_map": {}}])
             self.assertEqual([n["id"] for n in config.nvrs()], ["2", "3"])
             # Cached: no more secret reads within the minute.
             reads = len(self.broker.ops("secrets.get"))
@@ -4240,7 +4322,7 @@ class BrokerTests(TestCase):
 
     def test_nvr_pages_admin_only(self):
         self.assertEqual(self.client.get("/cameras/settings/nvrs/").status_code, 404)
-        for what in ("save", "remove", "test"):
+        for what in ("save", "remove", "test", "access-test"):
             self.assertEqual(self._post(what, {}).status_code, 404)
 
     def test_nvr_add_edit_remove(self):
@@ -4248,7 +4330,8 @@ class BrokerTests(TestCase):
         resp = self._post("save", {"name": "Home", "host": "https://10.0.0.1/protect", "api_key": "sekrit-key-1"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["nvrs"], [{"id": "1", "name": "Home", "host": "10.0.0.1", "username": "",
-                                                "has_api_key": True, "has_password": False}])
+                                                "has_api_key": True, "has_password": False,
+                                                "access_host": "", "has_access_token": False, "door_map": {}}])
         self.assertEqual(self.broker.secrets[("cameras", "protect_api_key_1")], "sekrit-key-1")
 
         # A blank key keeps the saved one; an account needs a password.
@@ -4307,6 +4390,108 @@ class BrokerTests(TestCase):
                 patch("cameras.views._test_login", return_value=False):
             body = self._post("test", {"host": "10.0.0.1", "api_key": "k", "username": "u", "password": "p"}).json()
             self.assertEqual((body["ok"], body["field"]), (False, "password"))
+
+    PIN = "ab" * 32
+
+    def test_nvr_door_unlock_settings(self):
+        """Door unlock is optional; a token needs the Access console's host,
+        a blank token keeps the saved one, and turning it off forgets it all."""
+        from . import config
+        self._nvr_admin()
+        self._post("save", {"name": "Home", "host": "10.0.0.5", "api_key": "k"})
+        self.assertNotIn(("cameras", "access_token_1"), self.broker.secrets)
+        self.assertEqual(config.protect_sites()[0]["door_map"], {})
+
+        resp = self._post("save", {"id": "1", "name": "Home", "host": "10.0.0.5", "access_token": "tok"})
+        self.assertEqual((resp.status_code, resp.json()["field"]), (400, "access_host"))
+        resp = self._post("save", {"id": "1", "name": "Home", "host": "10.0.0.5", "access_host": "10.0.0.1"})
+        self.assertEqual((resp.status_code, resp.json()["field"]), (400, "access_token"))
+
+        door_map = {"cam1": {"id": "d1", "name": "Front Door"}, "bad": "junk"}
+        with patch("cameras.views.access_api.fetch_pin", return_value=self.PIN) as fetch:
+            resp = self._post("save", {"id": "1", "name": "Home", "host": "10.0.0.5", "access_host": "10.0.0.1",
+                                       "access_token": "tok", "door_map": door_map})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        fetch.assert_called_once_with("10.0.0.1")
+        row = resp.json()["nvrs"][0]
+        self.assertEqual((row["access_host"], row["has_access_token"], row["door_map"]),
+                         ("10.0.0.1", True, {"cam1": {"id": "d1", "name": "Front Door"}}))
+        self.assertNotIn('"tok"', resp.content.decode())
+        self.assertEqual(self.broker.secrets[("cameras", "access_token_1")], "tok")
+        site = config.protect_sites()[0]
+        self.assertEqual((site["access_host"], site["access_token"], site["access_pin"], site["door_map"]),
+                         ("10.0.0.1", "tok", self.PIN, {"cam1": {"id": "d1", "name": "Front Door"}}))
+
+        # A blank token keeps the saved one and the pinned certificate; no door_map keeps the map.
+        with patch("cameras.views.access_api.fetch_pin") as fetch:
+            resp = self._post("save", {"id": "1", "name": "House", "host": "10.0.0.5", "access_host": "10.0.0.1"})
+        self.assertEqual(resp.status_code, 200)
+        fetch.assert_not_called()
+        self.assertEqual(self.broker.secrets[("cameras", "access_token_1")], "tok")
+        self.assertEqual(config.nvrs()[0]["door_map"], {"cam1": {"id": "d1", "name": "Front Door"}})
+        # Clearing the host while a token is saved is a mistake, not a removal.
+        resp = self._post("save", {"id": "1", "name": "House", "host": "10.0.0.5", "access_host": ""})
+        self.assertEqual((resp.status_code, resp.json()["field"]), (400, "access_host"))
+
+        resp = self._post("save", {"id": "1", "name": "House", "host": "10.0.0.5", "access_remove": True})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(("cameras", "access_token_1"), self.broker.secrets)
+        self.assertEqual({k for k in config.nvrs()[0] if k.startswith("access") or k == "door_map"}, set())
+        self.assertEqual(config.protect_sites()[0]["access_host"], "")
+
+    def test_nvr_save_access_unreachable(self):
+        from . import access_api
+        self._nvr_admin()
+        with patch("cameras.views.access_api.fetch_pin", side_effect=access_api.AccessError("unreachable")):
+            resp = self._post("save", {"name": "Home", "host": "10.0.0.5", "api_key": "k",
+                                       "access_host": "10.0.0.1", "access_token": "tok"})
+        self.assertEqual((resp.status_code, resp.json()["field"]), (400, "access_host"))
+        self.assertNotIn(("cameras", "access_token_1"), self.broker.secrets)
+
+    def test_nvr_remove_forgets_access_token(self):
+        self._nvr_admin()
+        with patch("cameras.views.access_api.fetch_pin", return_value=self.PIN):
+            self._post("save", {"name": "Home", "host": "10.0.0.5", "api_key": "k",
+                                "access_host": "10.0.0.1", "access_token": "tok"})
+        self.assertIn(("cameras", "access_token_1"), self.broker.secrets)
+        self._post("remove", {"id": "1"})
+        self.assertNotIn(("cameras", "access_token_1"), self.broker.secrets)
+
+    def test_nvr_access_test(self):
+        from . import access_api, config
+        self._nvr_admin()
+        doors = [{"id": "d1", "name": "Front Door"}]
+        with patch("cameras.views.access_api.fetch_pin", return_value=self.PIN), \
+                patch("cameras.views.access_api.list_doors", return_value=doors) as listed:
+            body = self._post("access-test", {"access_host": "https://10.0.0.1:12445/", "access_token": "tok"}).json()
+        self.assertEqual((body["ok"], body["doors"]), (True, doors))
+        listed.assert_called_once_with("10.0.0.1:12445", "tok", self.PIN)
+
+        # The tested certificate is the one saved, without fetching it again.
+        with patch("cameras.views.access_api.fetch_pin", return_value=self.PIN), \
+                patch("cameras.views.access_api.list_doors", return_value=doors):
+            self._post("access-test", {"access_host": "10.0.0.1", "access_token": "tok"})
+        with patch("cameras.views.access_api.fetch_pin", side_effect=AssertionError("refetched")):
+            resp = self._post("save", {"name": "Home", "host": "10.0.0.5", "api_key": "k",
+                                       "access_host": "10.0.0.1", "access_token": "tok"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(config.nvrs()[0]["access_pin"], self.PIN)
+
+        # A saved NVR tests with its saved token.
+        with patch("cameras.views.access_api.fetch_pin", return_value=self.PIN), \
+                patch("cameras.views.access_api.list_doors", return_value=doors) as listed:
+            self._post("access-test", {"id": "1", "access_host": "10.0.0.1"})
+        self.assertEqual(listed.call_args.args[1], "tok")
+
+        for err, field in (("unauthorized", "access_token"), ("unreachable", "access_host"),
+                           ("bad_response", "access_host")):
+            with patch("cameras.views.access_api.fetch_pin", return_value=self.PIN), \
+                    patch("cameras.views.access_api.list_doors", side_effect=access_api.AccessError(err)):
+                body = self._post("access-test", {"access_host": "10.0.0.1", "access_token": "bad"}).json()
+            self.assertEqual((body["ok"], body["field"]), (False, field), err)
+        self.assertEqual(self._post("access-test", {"access_host": "", "access_token": "t"}).json()["field"],
+                         "access_host")
+        self.assertEqual(self._post("access-test", {"access_host": "10.0.0.9"}).json()["field"], "access_token")
 
     def test_go2rtc_companion_wins(self):
         from . import config
@@ -4503,7 +4688,10 @@ class GuestEndpointTests(GuestTestCase):
         "camera_go2rtc_script",  # go2rtc's player code
     }
     SETTINGS = {"cameras_settings", "cameras_popups", "cameras_guests", "cameras_popup_entities",
-                "cameras_nvrs", "cameras_nvr_save", "cameras_nvr_remove", "cameras_nvr_test"}
+                "cameras_nvrs", "cameras_nvr_save", "cameras_nvr_remove", "cameras_nvr_test",
+                "cameras_nvr_access_test"}
+    # Admins only, for every camera (tested in DoorUnlockViewTests).
+    ADMIN_ONLY = {"door_unlock"}
 
     def setUp(self):
         super().setUp()
@@ -4595,7 +4783,7 @@ class GuestEndpointTests(GuestTestCase):
         from .routing import websocket_urlpatterns
         from .urls import urlpatterns
         names = {p.name for p in urlpatterns + websocket_urlpatterns}
-        self.assertEqual(names - set(self.ROUTES) - self.EXEMPT - self.SETTINGS, set())
+        self.assertEqual(names - set(self.ROUTES) - self.EXEMPT - self.SETTINGS - self.ADMIN_ONLY, set())
 
     def test_watch_relays_only_the_viewers_streams(self):
         """go2rtc gets just ``src``, on loopback; other streams of hidden cameras and
@@ -4829,3 +5017,280 @@ class GuestSettingsViewTests(GuestTestCase):
         self.assertEqual(resp.context["page"]["guests"],
                          {"visible": 2, "cameras": 3, "talk": True, "ptz": False, "events": "24h", "since": ""})
         self.assertContains(resp, 'href="/cameras/settings/guests/"')
+
+# --- Door unlock (UniFi Access) ---
+
+from . import access_api  # noqa: E402
+
+DOOR_PIN = "ab" * 32
+DOOR_SITES = [
+    {"id": "1", "name": "Home", "host": "10.0.0.5", "api_key": "k", "access_host": "10.0.0.1",
+     "access_token": "tok", "access_pin": DOOR_PIN,
+     "door_map": {"pub": {"id": "d1", "name": "Front Door"}}},
+    {"id": "2", "name": "Cabin", "host": "10.0.0.6", "api_key": "k", "access_host": "",
+     "access_token": "", "access_pin": "", "door_map": {}},
+]
+
+
+class DoorUnlockViewTests(TestCase):
+    def setUp(self):
+        from django.test import RequestFactory
+        self.factory = RequestFactory()
+        self.is_admin = True
+        self.sites = [dict(s) for s in DOOR_SITES]
+        django_cache.clear()
+        self.addCleanup(django_cache.clear)
+        for target, kw in (
+            ("cameras.policy.is_admin", {"side_effect": lambda request: self.is_admin}),
+            ("cameras.config.protect_sites", {"side_effect": lambda: [dict(s) for s in self.sites]}),
+            ("cameras.views.access_api.unlock", {"return_value": True}),
+            ("cameras.views._hub_label", {"return_value": "Mercer Island"}),
+            ("bdh_sdk.events.publish", {}),
+        ):
+            p = patch(target, **kw)
+            setattr(self, target.rsplit(".", 1)[1], p.start())
+            self.addCleanup(p.stop)
+
+    def post(self, body, user="stefan"):
+        from .views import door_unlock
+        request = self.factory.post("/cameras/door/unlock/", json.dumps(body), content_type="application/json")
+        request.user = MagicMock(username=user)
+        resp = door_unlock(request)
+        return resp.status_code, json.loads(resp.content)
+
+    def test_guests_are_refused(self):
+        self.is_admin = False
+        self.assertEqual(self.post({"camera_id": "pub"})[0], 403)
+        self.unlock.assert_not_called()
+
+    def test_guests_are_refused_over_http(self):
+        self.is_admin = False
+        resp = self.client.post("/cameras/door/unlock/", json.dumps({"camera_id": "pub"}),
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+        self.unlock.assert_not_called()
+
+    def test_post_only(self):
+        self.assertEqual(self.client.get("/cameras/door/unlock/").status_code, 405)
+
+    def test_unmapped_camera(self):
+        self.assertEqual(self.post({"camera_id": "shed"})[0], 404)
+        self.assertEqual(self.post({})[0], 400)
+        # A site without Access never unlocks, even with a stale map.
+        self.sites[0]["access_token"] = ""
+        self.assertEqual(self.post({"camera_id": "pub"})[0], 404)
+        self.unlock.assert_not_called()
+
+    def test_unlock_uses_the_server_side_door(self):
+        status, body = self.post({"camera_id": "pub", "door_id": "evil", "host": "6.6.6.6"})
+        self.assertEqual((status, body), (200, {"ok": True, "door": "Front Door"}))
+        args = self.unlock.call_args.args
+        self.assertEqual(args[:3], ("10.0.0.1", "tok", "d1"))
+        self.assertEqual(args[5], DOOR_PIN)
+        self.assertEqual(args[3], "bdh:stefan")
+        self.assertIn("stefan", args[4])
+        self.assertIn("Mercer Island", args[4])
+        topic, data = self.publish.call_args.args
+        self.assertEqual(topic, "cameras/door/unlocked")
+        self.assertEqual(data["message"], "Front Door (Home) unlocked by stefan")
+        self.assertNotIn("tok", json.dumps(data))
+
+    def test_access_errors(self):
+        for kind, status in (("unauthorized", 502), ("unreachable", 504), ("not_found", 502),
+                             ("pin_mismatch", 502)):
+            with self.subTest(kind=kind):
+                self.unlock.side_effect = access_api.AccessError(kind)
+                code, body = self.post({"camera_id": "pub"})
+                self.assertEqual((code, body["ok"]), (status, False))
+                self.assertNotIn("maybe_unlocked", body)
+        self.publish.assert_not_called()
+
+    def test_timeout_may_have_unlocked(self):
+        self.unlock.side_effect = access_api.AccessError("timeout")
+        code, body = self.post({"camera_id": "pub"})
+        self.assertEqual((code, body["ok"], body["maybe_unlocked"]), (504, False, True))
+        self.assertIn("may have unlocked", body["error"])
+        self.assertEqual(self.unlock.call_count, 1)  # never retried
+        self.assertEqual(self.publish.call_args.args[1]["result"], "timeout")
+
+    def test_repeat_after_success_is_not_sent_again(self):
+        self.assertEqual(self.post({"camera_id": "pub"})[1]["ok"], True)
+        status, body = self.post({"camera_id": "pub"})
+        self.assertEqual((status, body["ok"], body["duplicate"]), (200, True, True))
+        self.assertEqual(self.unlock.call_count, 1)
+
+    def test_repeat_after_failure_tries_again(self):
+        self.unlock.side_effect = access_api.AccessError("unreachable")
+        self.assertEqual(self.post({"camera_id": "pub"})[1]["ok"], False)
+        self.unlock.side_effect = None
+        self.assertEqual(self.post({"camera_id": "pub"}), (200, {"ok": True, "door": "Front Door"}))
+        self.assertEqual(self.unlock.call_count, 2)
+
+    def test_notification_failure_doesnt_fail_the_unlock(self):
+        self.publish.side_effect = RuntimeError("broker down")
+        self.assertEqual(self.post({"camera_id": "pub"}), (200, {"ok": True, "door": "Front Door"}))
+
+
+class DoorButtonTemplateTests(GuestTestCase):
+    """Only admins see the button, only for mapped cameras on NVRs with Access."""
+
+    def setUp(self):
+        super().setUp()
+        self.guests()
+        self.sites = [dict(s) for s in DOOR_SITES]
+        p = patch("cameras.config.protect_sites", side_effect=lambda: [dict(s) for s in self.sites])
+        p.start()
+        self.addCleanup(p.stop)
+
+    def feed(self):
+        return self.client.get("/cameras/").content.decode()
+
+    def popup(self):
+        return self.client.get("/cameras/popup/pub/").content.decode()
+
+    def test_guests_never_see_it(self):
+        for html in (self.feed(), self.popup()):
+            self.assertNotIn('class="cam-unlock"', html)
+            self.assertNotIn("Front Door", html)
+
+    def test_admins_see_it_on_mapped_cameras(self):
+        self.is_admin = True
+        html = self.feed()
+        self.assertEqual(html.count('class="cam-unlock"'), 1)
+        self.assertIn('data-door="Front Door"', html)
+        popup = self.popup()
+        self.assertIn('class="cam-unlock"', popup)
+        self.assertIn('data-door="Front Door"', popup)
+        self.assertNotIn('class="cam-unlock"', self.client.get("/cameras/popup/shed/").content.decode())
+
+    def test_no_access_settings_no_button(self):
+        self.is_admin = True
+        self.sites[0].update(access_host="", access_token="")
+        self.assertNotIn('class="cam-unlock"', self.feed())
+        self.assertNotIn('class="cam-unlock"', self.popup())
+
+    def test_guest_after_admin_has_no_door(self):
+        self.is_admin = True
+        self.assertIn("Front Door", self.feed())
+        self.is_admin = False
+        resp = self.client.get("/cameras/")
+        self.assertNotIn("Front Door", resp.content.decode())
+        self.assertTrue(all(not s.get("door_name") for site in resp.context["sites"] for s in site["streams"]))
+
+
+class AccessApiTests(SimpleTestCase):
+    """Against a local HTTPS server with a self-signed certificate."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import http.server
+        import ssl
+        import subprocess
+        import tempfile
+        import threading
+        from pathlib import Path
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cert, key = Path(cls.tmp.name, "c.pem"), Path(cls.tmp.name, "k.pem")
+        try:
+            subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                            "-subj", "/CN=access", "-keyout", str(key), "-out", str(cert)],
+                           check=True, capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            cls.tmp.cleanup()
+            raise unittest.SkipTest("openssl not available")
+        cls.der = ssl.PEM_cert_to_DER_cert(cert.read_text())
+        cls.requests = []
+        test = cls
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _reply(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                test.requests.append((self.command, self.path, self.headers.get("Authorization"),
+                                      self.rfile.read(length) if length else b""))
+                if self.headers.get("Authorization") != "Bearer good":
+                    status, body = 401, {"code": "CODE_UNAUTHORIZED", "msg": "no"}
+                elif self.path.endswith("/doors"):
+                    status, body = 200, {"code": "SUCCESS", "data": [
+                        {"id": "d2", "name": "Side Door", "door_lock_relay_status": "lock"},
+                        {"id": "d1", "name": "Front Door", "full_name": "Home - Front Door"},
+                        {"name": "no id"}]}
+                elif self.path.endswith("/doors/gone/unlock"):
+                    status, body = 200, {"code": "CODE_NOT_EXISTS", "msg": "no"}
+                else:
+                    status, body = 200, {"code": "SUCCESS", "data": None}
+                raw = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            do_GET = do_PUT = _reply
+
+        cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        cls.server.handle_error = lambda *a: None  # fetch_pin hangs up after the handshake
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(str(cert), str(key))
+        cls.server.socket = ctx.wrap_socket(cls.server.socket, server_side=True)
+        cls.host = f"127.0.0.1:{cls.server.server_address[1]}"
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.tmp.cleanup()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.requests.clear()
+
+    def test_pin_and_doors(self):
+        import hashlib
+        pin = access_api.fetch_pin(self.host)
+        self.assertEqual(pin, hashlib.sha256(self.der).hexdigest())
+        self.assertEqual(access_api.list_doors(self.host, "good", pin),
+                         [{"id": "d1", "name": "Front Door"}, {"id": "d2", "name": "Side Door"}])
+        self.assertEqual(self.requests[-1][:3], ("GET", "/api/v1/developer/doors", "Bearer good"))
+
+    def test_pin_mismatch(self):
+        with self.assertRaises(access_api.AccessError) as err:
+            access_api.list_doors(self.host, "good", "00" * 32)
+        self.assertEqual(err.exception.kind, "pin_mismatch")
+        self.assertEqual(self.requests, [])
+        with self.assertRaises(access_api.AccessError) as err:
+            access_api.unlock(self.host, "good", "d1", "a", "b", "")
+        self.assertEqual(err.exception.kind, "pin_mismatch")
+
+    def test_unlock(self):
+        pin = access_api.fetch_pin(self.host)
+        self.assertTrue(access_api.unlock(self.host, "good", "d1", "bdh:stefan", "BDH \u2013 stefan", pin))
+        method, path, _, body = self.requests[-1]
+        self.assertEqual((method, path), ("PUT", "/api/v1/developer/doors/d1/unlock"))
+        self.assertEqual(json.loads(body), {"actor_id": "bdh:stefan", "actor_name": "BDH \u2013 stefan"})
+        for token, door, kind in (("bad", "d1", "unauthorized"), ("good", "gone", "not_found")):
+            with self.assertRaises(access_api.AccessError) as err:
+                access_api.unlock(self.host, token, door, "a", "b", pin)
+            self.assertEqual(err.exception.kind, kind)
+
+    def test_unreachable(self):
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        with self.assertRaises(access_api.AccessError) as err:
+            access_api.fetch_pin(f"127.0.0.1:{port}")
+        self.assertEqual(err.exception.kind, "unreachable")
+        with self.assertRaises(access_api.AccessError) as err:
+            access_api.unlock(f"127.0.0.1:{port}", "good", "d1", "a", "b", DOOR_PIN)
+        self.assertEqual(err.exception.kind, "unreachable")
+
+    def test_parse_doors_rejects_junk(self):
+        for body in (None, {}, {"data": "x"}):
+            with self.assertRaises(access_api.AccessError):
+                access_api.parse_doors(body)

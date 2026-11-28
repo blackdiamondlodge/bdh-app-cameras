@@ -26,6 +26,13 @@
     .nv-hold::before { content: ""; position: absolute; inset: 0; width: 0; background: rgba(230,91,91,.28); transition: width 0s; }
     .nv-hold.go::before { width: 100%; transition: width 1.5s linear; }
     .nv-hold span { position: relative; }
+    .nv-acc-btns { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+    .nv-map { margin-top: 8px; }
+    .nv-map-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .nv-map-row:last-child { border-bottom: 0; }
+    .nv-map-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+    .nv-map-row em { color: var(--red); font-style: normal; font-size: 12.5px; }
+    .nv-map-row select { max-width: 55%; }
 </style>
 
 {% csrf_token %}
@@ -52,6 +59,15 @@
             <small>Some extras, like PTZ presets, need a local Protect user.</small>
             <label>Username<input class="hst-in txt" name="username" maxlength="256" autocapitalize="off" spellcheck="false"></label>
             <label>Password<input class="hst-in txt" name="password" type="password" maxlength="256"></label>
+            <h4>Door unlock (UniFi Access, optional)</h4>
+            <small>Lets admins hold a button on a camera to unlock its door. In the UniFi Access app: Settings → API Token, with Locations: Edit and everything else None.</small>
+            <label>Access console IP address or host name<input class="hst-in txt" name="access_host" maxlength="253" placeholder="192.168.1.1" autocapitalize="off" spellcheck="false"></label>
+            <label>Access API token<input class="hst-in txt" name="access_token" type="password" maxlength="1024" autocapitalize="off" spellcheck="false"></label>
+            <div class="nv-acc-btns">
+                <button type="button" class="hst-btn ghost" id="nv-doors">Find doors</button>
+                <button type="button" class="hst-btn ghost" id="nv-access-off">Turn off door unlock</button>
+            </div>
+            <div class="nv-map" id="nv-map"></div>
             <div id="nv-msg" aria-live="polite"></div>
         </form>
         <div class="nv-foot">
@@ -76,6 +92,10 @@
     const removeBtn = document.getElementById('nv-remove');
     const buttons = ['nv-test', 'nv-save', 'nv-cancel'].map(id => document.getElementById(id));
     let nvrs = page.nvrs, editing = null, busy = false;
+    // Door unlock: doors found by the last "Find doors" (null until then),
+    // the camera -> door map being edited, and whether to turn it all off.
+    let doors = null, doorMap = {}, cams = [], accessOff = false, autoPick = false;
+    const mapBox = document.getElementById('nv-map');
 
     function el(tag, cls, text) {
         const e = document.createElement(tag);
@@ -96,6 +116,7 @@
             if (n.username) bits.push('local account ' + n.username);
             const sub = el('small', '', bits.join(' · '));
             if (!n.has_api_key) sub.append(el('span', 'nv-bad', ' · no API key'));
+            else if (n.access_host) sub.append(document.createTextNode(n.has_access_token ? ' · door unlock' : ''));
             lbl.append(sub);
             const ctl = el('div', 'ctl');
             const edit = el('button', 'hst-btn ghost', 'Edit');
@@ -111,9 +132,65 @@
 
     function fields() {
         const d = {};
-        for (const k of ['name', 'host', 'api_key', 'username', 'password']) d[k] = form.elements[k].value;
+        for (const k of ['name', 'host', 'api_key', 'username', 'password', 'access_host', 'access_token']) d[k] = form.elements[k].value;
         if (editing) d.id = editing.id;
+        if (accessOff) d.access_remove = true;
+        else d.door_map = readMap();
         return d;
+    }
+
+    // "Front Door - Entry" goes with "Front Door"; looser matches are left to the admin.
+    function guessDoor(camName) {
+        if (!doors) return null;
+        const c = camName.trim().toLowerCase();
+        const hits = doors.filter(dr => {
+            const n = dr.name.trim().toLowerCase();
+            return n && (c === n || (c.startsWith(n) && /^[\s\-–—:_(]/.test(c.slice(n.length))));
+        });
+        return hits.length === 1 ? hits[0] : null;
+    }
+
+    function readMap() {
+        const out = {};
+        for (const sel of mapBox.querySelectorAll('select')) {
+            if (!sel.value) continue;
+            const dr = (doors || []).find(x => x.id === sel.value) || doorMap[sel.dataset.cam];
+            out[sel.dataset.cam] = {id: sel.value, name: dr ? dr.name : sel.value};
+        }
+        return out;
+    }
+
+    function renderMap() {
+        mapBox.replaceChildren();
+        if (accessOff) { mapBox.append(el('small', '', 'Door unlock is off for this NVR once you save.')); return; }
+        const ids = new Set(cams.map(c => c.id));
+        const rows = cams.map(c => ({id: c.id, name: c.name, missing: false}));
+        for (const id of Object.keys(doorMap)) if (!ids.has(id)) rows.push({id, name: id, missing: true});
+        if (!rows.length) {
+            if (doors) mapBox.append(el('small', '', editing ? 'No cameras to map yet.' : 'Save the NVR, then edit it to pick each camera\'s door.'));
+            return;
+        }
+        if (!doors && !Object.keys(doorMap).length) return;
+        mapBox.append(el('small', '', 'Which door each camera can unlock:'));
+        for (const r of rows) {
+            const row = el('div', 'nv-map-row');
+            const lbl = el('span', '', r.name);
+            if (r.missing) lbl.append(' ', el('em', '', 'camera missing'));
+            const sel = el('select', 'hst-in');
+            sel.dataset.cam = r.id;
+            sel.setAttribute('aria-label', 'Door for ' + r.name);
+            sel.append(new Option('None', ''));
+            const saved = doorMap[r.id];
+            for (const dr of doors || []) sel.append(new Option(dr.name, dr.id));
+            if (saved && !(doors || []).some(dr => dr.id === saved.id)) {
+                sel.append(new Option(saved.name, saved.id));
+                if (doors) lbl.append(' ', el('em', '', 'door not found'));
+            }
+            if (saved) sel.value = saved.id;
+            else if (autoPick && !r.missing) { const g = guessDoor(r.name); if (g) sel.value = g.id; }
+            row.append(lbl, sel);
+            mapBox.append(row);
+        }
     }
 
     function open(n) {
@@ -129,6 +206,14 @@
         }
         form.elements.api_key.placeholder = n && n.has_api_key ? 'Saved — leave blank to keep it' : '';
         form.elements.password.placeholder = n && n.has_password ? 'Saved — leave blank to keep it' : '';
+        form.elements.access_host.value = n ? (n.access_host || '') : '';
+        form.elements.access_token.placeholder = n && n.has_access_token ? 'Saved — leave blank to keep it' : '';
+        doors = null; accessOff = false;
+        doorMap = n ? Object.assign({}, n.door_map || {}) : {};
+        autoPick = !Object.keys(doorMap).length;
+        cams = (n && (page.cameras || {})[n.id]) || [];
+        accessOffBtn.style.display = n && n.access_host ? '' : 'none';
+        renderMap();
         removeBtn.style.display = n ? '' : 'none';
         modal.classList.add('open');
         form.elements.name.focus();
@@ -175,6 +260,27 @@
             say('Connected — ' + c + (c === 1 ? ' camera.' : ' cameras.') + (form.elements.username.value ? ' Account signed in.' : ''), 'ok');
         } else fail(data);
     }));
+
+    const accessOffBtn = document.getElementById('nv-access-off');
+    document.getElementById('nv-doors').addEventListener('click', () => run('Looking for doors…', async () => {
+        accessOff = false;
+        const keep = readMap();
+        const data = await post(page.access_test_url, fields());
+        if (data.ok) {
+            doors = data.doors || [];
+            if (data.cameras && data.cameras.length) cams = data.cameras;
+            if (Object.keys(keep).length) doorMap = keep;
+            renderMap();
+            say('Found ' + doors.length + (doors.length === 1 ? ' door.' : ' doors.'), 'ok');
+        } else fail(data);
+    }));
+    accessOffBtn.addEventListener('click', () => {
+        accessOff = true;
+        form.elements.access_host.value = '';
+        form.elements.access_token.value = '';
+        renderMap();
+        say('Save to turn off door unlock.');
+    });
 
     document.getElementById('nv-save').addEventListener('click', () => run('Saving…', async () => {
         const data = await post(page.save_url, fields());
