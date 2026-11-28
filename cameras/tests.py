@@ -2279,7 +2279,9 @@ class CameraStreamSeleniumTests(WebsocketLiveServerTestCase):
             {'name': 'Mercer Island', 'host': '192.168.1.26', 'cameras': []},
         ]
         active = "return document.querySelector('.site-tab.active')?.dataset.site"
-        with patch('cameras.views.get_protect_cameras', return_value=sites), \
+        with patch('cameras.policy.is_admin', return_value=True), \
+                patch('cameras.config.protect_sites', return_value=[{'name': s['name']} for s in sites]), \
+                patch('cameras.views.get_protect_cameras', return_value=sites), \
                 patch('cameras.views._register_streams_with_go2rtc'):
             self.driver.get(f'{self.live_server_url}/cameras/')
             self.assertEqual(self.driver.execute_script(active), '0')
